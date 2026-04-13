@@ -1,36 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Podcast Script Generator
 
-## Getting Started
+Aplicación local-first para convertir entre `1` y `5` fuentes en texto plano en un guión de podcast trazable, editable y generado fase a fase con Gemini.
 
-First, run the development server:
+## Qué hace
+
+- Crea episodios con `topic`, tipo (`summary` o `deep_dive`), duración objetivo y notas editoriales.
+- Guarda las fuentes en SQLite local usando `Drizzle`.
+- Ejecuta una pipeline manual: `Fuentes -> Extracción -> Consolidación -> Outline -> Guión -> Auditoría`.
+- Permite elegir el modelo de Gemini por fase.
+- Guarda el contenido original generado, tus ediciones y el historial de versiones.
+- Solo deja avanzar usando versiones aprobadas.
+
+## Stack
+
+- `Next.js 16` con App Router
+- `Tailwind v4`
+- `shadcn/ui` base
+- `SQLite local` con `@libsql/client` + `Drizzle ORM`
+- `Gemini API` con `@google/genai`
+
+## Setup
+
+1. Copia `.env.example` a `.env.local`.
+2. Añade `GEMINI_API_KEY`.
+3. Instala dependencias si hace falta con `pnpm install`.
+4. Arranca la app:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+La base de datos se crea automáticamente en `data/podcast-script-generator.db`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Comandos útiles
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+pnpm dev
+pnpm lint
+pnpm typecheck
+pnpm build
+```
 
-## Learn More
+## Flujo recomendado
 
-To learn more about Next.js, take a look at the following resources:
+1. Crea un episodio y pega las fuentes.
+2. Genera las extracciones y corrige el JSON por fuente si hace falta.
+3. Aprueba cada extracción.
+4. Genera consolidación, outline, guión y auditoría, siempre aprobando la fase anterior.
+5. Si la auditoría falla, vuelve al guión, edita o regenera, y audita otra vez.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Notas
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- La v1 está pensada para uso local y sin autenticación.
+- Las fases intermedias se editan como JSON estructurado.
+- El guión se edita como `Markdown locutable`.
