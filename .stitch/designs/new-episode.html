@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>New Episode Form - ScriptArchitect</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "background": "#f8f9ff",
+                        "on-tertiary-fixed-variant": "#7b2f00",
+                        "tertiary-container": "#a44100",
+                        "tertiary-fixed": "#ffdbcc",
+                        "error-container": "#ffdad6",
+                        "on-error-container": "#93000a",
+                        "surface-container-lowest": "#ffffff",
+                        "on-primary-container": "#dad7ff",
+                        "primary": "#3525cd",
+                        "on-secondary-fixed-variant": "#413f82",
+                        "surface": "#f8f9ff",
+                        "error": "#ba1a1a",
+                        "secondary-fixed-dim": "#c3c0ff",
+                        "surface-bright": "#f8f9ff",
+                        "inverse-surface": "#233144",
+                        "inverse-on-surface": "#eaf1ff",
+                        "tertiary": "#7e3000",
+                        "on-surface": "#0d1c2e",
+                        "primary-fixed-dim": "#c3c0ff",
+                        "secondary": "#58579b",
+                        "on-secondary-fixed": "#140f54",
+                        "surface-container-low": "#eff4ff",
+                        "surface-container-high": "#dce9ff",
+                        "outline": "#777587",
+                        "on-surface-variant": "#464555",
+                        "surface-container": "#e6eeff",
+                        "on-tertiary": "#ffffff",
+                        "secondary-fixed": "#e2dfff",
+                        "secondary-container": "#b6b4ff",
+                        "on-tertiary-container": "#ffd2be",
+                        "tertiary-fixed-dim": "#ffb695",
+                        "on-primary": "#ffffff",
+                        "on-primary-fixed": "#0f0069",
+                        "on-secondary-container": "#454386",
+                        "on-secondary": "#ffffff",
+                        "surface-variant": "#d5e3fc",
+                        "inverse-primary": "#c3c0ff",
+                        "surface-container-highest": "#d5e3fc",
+                        "on-error": "#ffffff",
+                        "on-background": "#0d1c2e",
+                        "on-primary-fixed-variant": "#3323cc",
+                        "outline-variant": "#c7c4d8",
+                        "surface-dim": "#ccdbf3",
+                        "primary-container": "#4f46e5",
+                        "surface-tint": "#4d44e3",
+                        "on-tertiary-fixed": "#351000",
+                        "primary-fixed": "#e2dfff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Inter"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-toolbar {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(20px);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #c7c4d8;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body class="bg-surface text-on-surface flex overflow-hidden">
+<!-- SideNavBar Anchor -->
+<aside class="flex flex-col h-screen w-64 border-r-0 bg-slate-50 dark:bg-slate-950 py-6 px-4 shrink-0">
+<div class="mb-8 px-2">
+<h1 class="text-lg font-bold text-slate-900 dark:text-slate-50 tracking-tight">The Architectural Ledger</h1>
+<p class="text-xs text-on-surface-variant">Lead Scriptwriter</p>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-indigo-700 dark:text-indigo-300 font-semibold border-r-2 border-indigo-600 bg-slate-200/50 transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="folder_open">folder_open</span>
+<span class="text-sm tracking-normal">Projects</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-200/50 transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="account_tree">account_tree</span>
+<span class="text-sm tracking-normal">Pipelines</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-200/50 transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="edit_note">edit_note</span>
+<span class="text-sm tracking-normal">Workspace</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-200/50 transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="history">history</span>
+<span class="text-sm tracking-normal">Archives</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-200/50 transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="text-sm tracking-normal">Settings</span>
+</a>
+</nav>
+<div class="mt-auto pt-6 border-t border-outline-variant/10">
+<button class="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white py-2.5 rounded-xl font-medium shadow-sm hover:translate-y-[-1px] active:opacity-80 transition-all duration-200 text-sm">
+<span class="material-symbols-outlined text-sm" data-icon="add">add</span>
+                New Project
+            </button>
+<div class="mt-6 flex items-center gap-3 px-2">
+<img class="w-8 h-8 rounded-full object-cover" data-alt="portrait of a professional creative director in a minimalist studio setting with soft natural lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCH0I3XzswfzDu9NbI_fADNmoEhQ11jwXApIg9SfJW-qUIE0TcAplf_Accr-WHv7rSc6v_65CvYIkZSriVbwCGnygA7JPon4QKuxqr2ZCP3innShEZldD8vuLLTNlnyPW3s8PNQbJzVaa1T6hNHMpAZ-ZOwn8stIk9AN8Tq8OH_uMEYiCgl1bkY7ePpeONMG0R2B6VpfzZQTlD2yn67ctOPNtoJCeatSIwQMQjzUXdln9zz8-twuEzcV6oJvnpgkmOOrlPueGR8esQ"/>
+<div class="overflow-hidden">
+<p class="text-sm font-semibold truncate text-on-surface">Alex Mercer</p>
+<p class="text-[10px] uppercase tracking-wider text-on-surface-variant">Pro Plan</p>
+</div>
+</div>
+</div>
+</aside>
+<div class="flex-1 flex flex-col h-screen relative overflow-hidden">
+<!-- TopNavBar Anchor -->
+<header class="flex items-center justify-between px-8 h-16 w-full fixed top-0 right-0 w-[calc(100%-16rem)] z-40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/20 dark:border-slate-800/20 shadow-sm dark:shadow-none">
+<div class="flex items-center gap-8">
+<span class="text-xl font-bold text-slate-900 dark:text-slate-100">ScriptArchitect</span>
+<nav class="hidden md:flex items-center gap-6">
+<a class="text-indigo-600 dark:text-indigo-400 border-b-2 border-indigo-600 pb-2 text-[0.875rem] font-medium transition-all" href="#">Extraction</a>
+<a class="text-slate-500 dark:text-slate-400 pb-2 text-[0.875rem] font-medium hover:text-indigo-500 transition-all" href="#">Consolidation</a>
+<a class="text-slate-500 dark:text-slate-400 pb-2 text-[0.875rem] font-medium hover:text-indigo-500 transition-all" href="#">Outline</a>
+<a class="text-slate-500 dark:text-slate-400 pb-2 text-[0.875rem] font-medium hover:text-indigo-500 transition-all" href="#">Script</a>
+<a class="text-slate-500 dark:text-slate-400 pb-2 text-[0.875rem] font-medium hover:text-indigo-500 transition-all" href="#">Audit</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2 mr-4">
+<button class="p-2 text-on-surface-variant hover:bg-surface-container-low rounded-full transition-colors">
+<span class="material-symbols-outlined" data-icon="settings_suggest">settings_suggest</span>
+</button>
+<button class="p-2 text-on-surface-variant hover:bg-surface-container-low rounded-full transition-colors">
+<span class="material-symbols-outlined" data-icon="auto_awesome">auto_awesome</span>
+</button>
+</div>
+<button class="px-4 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">History</button>
+<button class="px-4 py-1.5 text-sm font-medium bg-gradient-to-br from-primary to-primary-container text-white rounded-lg shadow-sm hover:translate-y-[-1px] transition-all">Approve Stage</button>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="mt-16 flex-1 overflow-y-auto custom-scrollbar p-12 bg-surface">
+<div class="max-w-4xl mx-auto">
+<!-- Page Header -->
+<div class="mb-12">
+<div class="flex items-center gap-2 text-primary font-semibold mb-2">
+<span class="material-symbols-outlined text-sm" data-icon="fiber_new">fiber_new</span>
+<span class="text-xs uppercase tracking-[0.1em]">New Episode Pipeline</span>
+</div>
+<h2 class="text-[2.5rem] font-bold text-on-surface tracking-tight leading-tight">Architect Your Narrative</h2>
+<p class="text-on-surface-variant text-lg mt-2 max-w-2xl">Define the core parameters and raw source materials for your next broadcast-quality script.</p>
+</div>
+<!-- Form Section -->
+<div class="space-y-8">
+<!-- Structural Section: Core Identity -->
+<section class="bg-surface-container-lowest p-8 rounded-xl border border-outline-variant/10 shadow-[0px_12px_32px_rgba(13,28,46,0.04)]">
+<div class="flex items-center gap-3 mb-8">
+<div class="w-8 h-8 rounded-lg bg-primary-fixed flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[20px]" data-icon="category">category</span>
+</div>
+<h3 class="text-xl font-semibold text-on-surface">Core Definition</h3>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+<div class="space-y-2">
+<label class="text-[0.75rem] font-bold text-on-surface-variant uppercase tracking-wider">Topic</label>
+<input class="w-full bg-transparent border-0 border-b border-outline-variant/20 focus:ring-0 focus:border-primary px-0 py-2 text-lg text-on-surface placeholder:text-outline/40 transition-all" placeholder="e.g. The Future of Neural Architecture" type="text"/>
+</div>
+<div class="space-y-2">
+<label class="text-[0.75rem] font-bold text-on-surface-variant uppercase tracking-wider">Episode Type</label>
+<div class="flex gap-4 pt-1">
+<label class="flex-1 cursor-pointer group">
+<input class="hidden peer" name="type" type="radio"/>
+<div class="border border-outline-variant/20 p-3 rounded-lg flex items-center justify-center gap-2 text-on-surface-variant peer-checked:border-primary peer-checked:bg-primary-fixed peer-checked:text-primary transition-all">
+<span class="material-symbols-outlined text-sm" data-icon="article">article</span>
+<span class="text-sm font-medium">Summary</span>
+</div>
+</label>
+<label class="flex-1 cursor-pointer group">
+<input checked="" class="hidden peer" name="type" type="radio"/>
+<div class="border border-outline-variant/20 p-3 rounded-lg flex items-center justify-center gap-2 text-on-surface-variant peer-checked:border-primary peer-checked:bg-primary-fixed peer-checked:text-primary transition-all">
+<span class="material-symbols-outlined text-sm" data-icon="microscope">magnification_small</span>
+<span class="text-sm font-medium">Deep Dive</span>
+</div>
+</label>
+</div>
+</div>
+<div class="space-y-2">
+<label class="text-[0.75rem] font-bold text-on-surface-variant uppercase tracking-wider">Target Minutes</label>
+<div class="relative">
+<input class="w-full bg-transparent border-0 border-b border-outline-variant/20 focus:ring-0 focus:border-primary px-0 py-2 text-lg text-on-surface transition-all" placeholder="25" type="number"/>
+<span class="absolute right-0 bottom-2 text-xs font-medium text-outline">MIN</span>
+</div>
+</div>
+<div class="space-y-2">
+<label class="text-[0.75rem] font-bold text-on-surface-variant uppercase tracking-wider">Angle Hint</label>
+<input class="w-full bg-transparent border-0 border-b border-outline-variant/20 focus:ring-0 focus:border-primary px-0 py-2 text-lg text-on-surface placeholder:text-outline/40 transition-all" placeholder="Provocative, contrarian perspective" type="text"/>
+</div>
+</div>
+</section>
+<!-- Structural Section: Editorial Notes -->
+<section class="bg-surface-container-low p-8 rounded-xl">
+<div class="flex items-center gap-3 mb-6">
+<div class="w-8 h-8 rounded-lg bg-surface-container-high flex items-center justify-center text-on-surface">
+<span class="material-symbols-outlined text-[20px]" data-icon="stylus_note">stylus_note</span>
+</div>
+<h3 class="text-xl font-semibold text-on-surface">Editorial Direction</h3>
+</div>
+<textarea class="w-full bg-surface-container-lowest border border-outline-variant/20 rounded-xl p-4 text-on-surface focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all resize-none" placeholder="Describe the tone, desired takeaways, and any 'no-go' zones for the AI writer..." rows="4"></textarea>
+</section>
+<!-- Structural Section: Multi-Source Inputs -->
+<section class="space-y-6">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-lg bg-secondary-fixed flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined text-[20px]" data-icon="database">database</span>
+</div>
+<h3 class="text-xl font-semibold text-on-surface">Source Text</h3>
+</div>
+<span class="text-xs font-bold text-outline uppercase tracking-widest">1 - 5 Slots available</span>
+</div>
+<div class="grid grid-cols-1 gap-4">
+<!-- Source Input 1 -->
+<div class="group relative bg-surface-container-lowest rounded-xl border border-outline-variant/10 p-6 focus-within:ring-2 focus-within:ring-primary/20 transition-all">
+<div class="flex items-center justify-between mb-3">
+<span class="text-[10px] font-bold text-primary uppercase tracking-tighter bg-primary/10 px-2 py-0.5 rounded">Source 01</span>
+<button class="text-outline hover:text-error transition-colors">
+<span class="material-symbols-outlined text-sm" data-icon="delete">delete</span>
+</button>
+</div>
+<textarea class="w-full bg-transparent border-0 focus:ring-0 p-0 text-on-surface-variant placeholder:text-outline/40 text-sm resize-none" placeholder="Paste transcript, article text, or research notes here..." rows="3"></textarea>
+</div>
+<!-- Source Input 2 (Collapsed/Draft Style) -->
+<div class="group relative bg-surface-container-lowest rounded-xl border border-outline-variant/10 p-6 opacity-60 hover:opacity-100 transition-all">
+<div class="flex items-center justify-between mb-3">
+<span class="text-[10px] font-bold text-outline-variant uppercase tracking-tighter bg-surface-container-high px-2 py-0.5 rounded">Source 02</span>
+</div>
+<textarea class="w-full bg-transparent border-0 focus:ring-0 p-0 text-on-surface-variant placeholder:text-outline/40 text-sm resize-none" placeholder="Paste secondary source material..." rows="3"></textarea>
+</div>
+<!-- Add Source Button -->
+<button class="w-full py-4 border-2 border-dashed border-outline-variant/20 rounded-xl text-outline-variant hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-all flex flex-col items-center gap-1">
+<span class="material-symbols-outlined" data-icon="add_circle">add_circle</span>
+<span class="text-xs font-bold uppercase tracking-widest">Add Primary Source</span>
+</button>
+</div>
+</section>
+<!-- Footer Action -->
+<div class="pt-12 pb-24 flex items-center justify-between border-t border-outline-variant/10">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-full border border-outline-variant/20 flex items-center justify-center text-outline">
+<span class="material-symbols-outlined" data-icon="info">info</span>
+</div>
+<p class="text-sm text-on-surface-variant max-w-[200px] leading-snug">Estimating 12,000 tokens for initial extraction stage.</p>
+</div>
+<div class="flex gap-4">
+<button class="px-8 py-3.5 text-sm font-semibold text-on-surface hover:bg-surface-container-high rounded-xl transition-all">Save Draft</button>
+<button class="px-10 py-3.5 text-sm font-bold bg-gradient-to-br from-primary to-primary-container text-white rounded-xl shadow-[0px_8px_24px_rgba(53,37,205,0.25)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2">
+                                Create Episode
+                                <span class="material-symbols-outlined text-[18px]" data-icon="bolt">bolt</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Floating Contextual Help (Signature Glassmorphism) -->
+<div class="absolute bottom-8 right-8 glass-toolbar p-4 rounded-2xl shadow-2xl border border-white/20 z-50 flex items-center gap-4">
+<div class="flex -space-x-2">
+<img class="w-8 h-8 rounded-full border-2 border-white object-cover" data-alt="portrait of a software architect in a bright modern office with warm lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDll-GyYsBP42sKHTuP3nt2ED1z9ZbhBI2yE_3316H3jQpDAeW_aeholwO-VHrOblUWDrPLdqF-FQtiIcowEyVZ6iVCyRRgiF73vJrh_F8M0wX75IK4pSztFqE4gbTzvz1DHePRZVZEkCtef-SlOALIPKwRoReqjcaNZTnAX74W3-xH8sJGrWRKz_ak5sy2_Z7sJDxttf75Vi7MEdPN6Q8v2PHzC2KcM73qRBIOXc1eFaiDjs90g_45qNuLpe023KEY9a9D8FmQNSc"/>
+<div class="w-8 h-8 rounded-full bg-primary-fixed border-2 border-white flex items-center justify-center text-[10px] font-bold text-primary">AI</div>
+</div>
+<div class="h-8 w-px bg-outline-variant/30"></div>
+<p class="text-[0.75rem] font-medium text-on-surface-variant">Ready to extract themes</p>
+<button class="bg-on-surface text-surface text-[0.7rem] font-bold uppercase tracking-widest px-3 py-1.5 rounded-lg hover:opacity-90 transition-opacity">Guide Me</button>
+</div>
+</div>
+</body></html>

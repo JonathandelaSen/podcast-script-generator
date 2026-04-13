@@ -1,0 +1,45 @@
+[     144ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[     182ms] [LOG] [HMR] connected @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[  830409ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[  830629ms] [LOG] [Fast Refresh] done in 272ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[  895180ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[  895206ms] [LOG] [Fast Refresh] done in 64ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1000936ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1000962ms] [LOG] [Fast Refresh] done in 95ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1040947ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1040973ms] [LOG] [Fast Refresh] done in 98ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1078403ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1078817ms] [LOG] [Fast Refresh] done in 342ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1126966ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1127017ms] [LOG] [Fast Refresh] done in 153ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1643911ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1644188ms] [LOG] [Fast Refresh] done in 152ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1800078ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1800293ms] [LOG] [Fast Refresh] done in 35ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1800654ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1800662ms] [LOG] [Fast Refresh] done in 118ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1825701ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1825941ms] [LOG] [Fast Refresh] done in 67ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1826143ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1826319ms] [LOG] [Fast Refresh] done in 276ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1827729ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1827859ms] [WARNING] [HMR] Invalid message: {"isTrusted":true}
+TypeError: Cannot convert undefined or null to object
+    at Object.keys (<anonymous>)
+    at extractModulesFromTurbopackMessage (http://localhost:3001/_next/static/chunks/09q._next_dist_client_0slhn09._.js:13631:39)
+    at TurbopackHmr.onTurbopackMessage (http://localhost:3001/_next/static/chunks/09q._next_dist_client_0slhn09._.js:13578:32)
+    at processMessage (http://localhost:3001/_next/static/chunks/09q._next_dist_client_0slhn09._.js:13936:30)
+    at WebSocket.handleMessage (http://localhost:3001/_next/static/chunks/09q._next_dist_client_0slhn09._.js:13335:52) @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1827859ms] [LOG] [Fast Refresh] done in 187ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1828049ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1828185ms] [LOG] [Fast Refresh] done in 237ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1830033ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1830215ms] [LOG] [Fast Refresh] done in 285ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1910599ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1910619ms] [LOG] [Fast Refresh] done in 43ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1926544ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 1926621ms] [LOG] [Fast Refresh] done in 29ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 3008179ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 3008270ms] [LOG] [Fast Refresh] done in 164ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 3082406ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 3082423ms] [LOG] [Fast Refresh] done in 69ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431

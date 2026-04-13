@@ -1,0 +1,115 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - generic [ref=e5]:
+        - img [ref=e7]
+        - generic [ref=e8]:
+          - heading "The Architectural Ledger" [level=1] [ref=e9]
+          - paragraph [ref=e10]: Lead Scriptwriter
+      - navigation [ref=e11]:
+        - link "Proyectos" [ref=e12] [cursor=pointer]:
+          - /url: /
+          - img [ref=e13]
+          - text: Proyectos
+        - generic [ref=e15]:
+          - img [ref=e16]
+          - text: Pipelines
+        - generic [ref=e20]:
+          - img [ref=e21]
+          - text: Workspace
+        - generic [ref=e24]:
+          - img [ref=e25]
+          - text: Archives
+        - generic [ref=e29]:
+          - img [ref=e30]
+          - text: Settings
+      - link "New Project" [ref=e34] [cursor=pointer]:
+        - /url: /#new-episode
+        - img [ref=e35]
+        - text: New Project
+      - generic [ref=e38]:
+        - generic [ref=e39]: SM
+        - generic [ref=e40]:
+          - paragraph [ref=e41]: Sarah Mitchell
+          - paragraph [ref=e42]: Executive Editor
+    - banner [ref=e43]:
+      - generic [ref=e44]:
+        - generic [ref=e45]: ScriptArchitect
+        - navigation [ref=e46]:
+          - generic [ref=e47]: Extraction
+          - generic [ref=e48]: Consolidation
+          - generic [ref=e49]: Outline
+          - generic [ref=e50]: Script
+          - generic [ref=e51]: Audit
+      - generic [ref=e52]:
+        - button "History" [ref=e53]:
+          - img [ref=e54]
+          - generic [ref=e58]: History
+        - button "Approve Stage" [ref=e59]
+        - generic [ref=e61]:
+          - img [ref=e62]
+          - img [ref=e65]
+          - img [ref=e68]
+    - main [ref=e73]:
+      - generic [ref=e74]:
+        - generic [ref=e75]:
+          - heading "Active Episodes" [level=2] [ref=e76]
+          - paragraph [ref=e77]: Manage your ongoing narrative structures and script pipelines from a centralized architectural view.
+        - generic [ref=e78]:
+          - generic [ref=e79]:
+            - textbox "Search projects..." [ref=e80]
+            - img [ref=e81]
+          - button "New Project" [ref=e84]:
+            - img
+            - text: New Project
+      - generic [ref=e85]:
+        - generic [ref=e86]:
+          - paragraph [ref=e87]: Total Episodes
+          - paragraph [ref=e89]: "0"
+        - generic [ref=e90]:
+          - paragraph [ref=e91]: In Progress
+          - generic [ref=e92]:
+            - paragraph [ref=e93]: "0"
+            - generic [ref=e94]: Active
+        - generic [ref=e95]:
+          - paragraph [ref=e96]: Ready for Audit
+          - paragraph [ref=e98]: "00"
+        - generic [ref=e99]:
+          - paragraph [ref=e100]: Drafts
+          - paragraph [ref=e102]: "00"
+      - table [ref=e104]:
+        - rowgroup [ref=e105]:
+          - row "Project / Episode Topic Status Last Updated Actions" [ref=e106]:
+            - columnheader "Project / Episode" [ref=e107]
+            - columnheader "Topic" [ref=e108]
+            - columnheader "Status" [ref=e109]
+            - columnheader "Last Updated" [ref=e110]
+            - columnheader "Actions" [ref=e111]
+        - rowgroup [ref=e112]:
+          - row "No episodes yet. Start your first project to populate the ledger. The new episode flow lives behind a focused panel instead of competing with the dashboard. Launch Wizard" [ref=e113]:
+            - cell "No episodes yet. Start your first project to populate the ledger. The new episode flow lives behind a focused panel instead of competing with the dashboard. Launch Wizard" [ref=e114]:
+              - generic [ref=e115]:
+                - paragraph [ref=e116]: No episodes yet.
+                - paragraph [ref=e117]: Start your first project to populate the ledger. The new episode flow lives behind a focused panel instead of competing with the dashboard.
+                - button "Launch Wizard" [ref=e118]:
+                  - img
+                  - text: Launch Wizard
+      - generic [ref=e120]:
+        - generic [ref=e121]:
+          - heading "Architect a New Narrative" [level=3] [ref=e122]
+          - paragraph [ref=e123]: Ready to begin the next exploration? Open the episode wizard to capture topic, angle, timing and source deck without cluttering the dashboard itself.
+          - generic [ref=e124]:
+            - button "Launch Wizard" [ref=e125]:
+              - img
+              - text: Launch Wizard
+            - generic [ref=e126]:
+              - text: Dashboard focused, wizard on demand
+              - img [ref=e127]
+        - generic [ref=e133]:
+          - paragraph [ref=e135]: Sources
+          - paragraph [ref=e137]: Outline
+          - paragraph [ref=e139]: Script
+      - button [ref=e140]:
+        - img [ref=e141]
+  - button "Open Next.js Dev Tools" [ref=e147] [cursor=pointer]:
+    - img [ref=e148]
