@@ -43,3 +43,4 @@ TypeError: Cannot convert undefined or null to object
 [ 3008270ms] [LOG] [Fast Refresh] done in 164ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
 [ 3082406ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
 [ 3082423ms] [LOG] [Fast Refresh] done in 69ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 5347170ms] [ERROR] WebSocket connection to 'ws://localhost:3001/_next/webpack-hmr?id=sbFjxSK2lI6m3FM-SacI4' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/_next/static/chunks/09q._next_dist_client_0slhn09._.js:13299

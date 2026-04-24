@@ -52,11 +52,113 @@ async function generateStructured<TStage extends ArtifactStageKey>(params: {
   }
 
   const parsed = JSON.parse(text);
-  return schema.parse(parsed);
+  const result = schema.safeParse(parsed);
+
+  if (!result.success) {
+    const issueSummary = result.error.issues
+      .slice(0, 8)
+      .map((issue) => {
+        const path = issue.path.length > 0 ? issue.path.join(".") : "root";
+        return `${path}: ${issue.message}`;
+      })
+      .join("; ");
+
+    throw new Error(
+      `La respuesta de Gemini no encaja con el schema de ${params.stage}: ${issueSummary}`,
+    );
+  }
+
+  return result.data;
 }
 
 function briefBlock(brief: EpisodeBrief) {
   return JSON.stringify(brief, null, 2);
+}
+
+function adjustmentRules(stage: ArtifactStageKey, sourceId?: string | null) {
+  switch (stage) {
+    case "extraction":
+      return `
+- Trabaja solo con la fuente incluida en el contexto.
+- Respeta la instrucción del usuario sin inventar datos que no estén en rawText.
+- sourceId debe ser exactamente "${sourceId ?? ""}".
+- evidenceQuote debe seguir siendo una cita literal corta del texto fuente.
+- importance debe ser un número entero JSON entre 1 y 5, nunca texto.
+- Conserva los claims y mustKeep valiosos salvo que la instrucción pida retirarlos claramente.
+`.trim();
+    case "consolidation":
+      return `
+- Usa las extracciones aprobadas como única base factual.
+- corePoints, secondaryPoints, contradictions y mustCoverClaimRefs deben referenciar claims existentes.
+- Usa refs en formato "sourceId:claimId".
+- Conserva el enfoque editorial salvo que la instrucción pida cambiarlo.
+`.trim();
+    case "outline":
+      return `
+- Usa la consolidación aprobada como base editorial.
+- Mantén una estructura locutable y coherente con la duración objetivo.
+- Los mustIncludeClaimRefs deben apuntar a claims presentes en la consolidación.
+- Ajusta solo lo necesario para cumplir la instrucción.
+`.trim();
+    case "script":
+      return `
+- Usa extracciones, consolidación y outline aprobados como base factual.
+- Devuelve un monólogo locutable en español.
+- No inventes datos ni atribuyas certezas falsas.
+- Conserva coveredClaimRefs que sigan cubiertos tras el ajuste y añade los nuevos refs cubiertos.
+- Mantén scriptMarkdown limpio y bien estructurado en bloques.
+`.trim();
+    case "audit":
+      return `
+- Usa el guión y las fases aprobadas como base factual.
+- Mantén una auditoría estricta: pass debe ser false si faltan mustKeep relevantes o hay soporte débil.
+- score debe ir de 0 a 100.
+- suggestedRepairs debe ser accionable para una nueva redacción.
+`.trim();
+  }
+}
+
+export async function adjustArtifact<TStage extends ArtifactStageKey>(params: {
+  model: string;
+  stage: TStage;
+  brief: EpisodeBrief;
+  currentArtifact: ArtifactPayloadByStage[TStage];
+  instruction: string;
+  context: unknown;
+  sourceId?: string | null;
+}) {
+  const prompt = `
+Eres un editor senior de podcast. Vas a ajustar una versión existente de una fase generada por IA siguiendo una instrucción del usuario.
+
+Devuelve exclusivamente JSON válido y compatible con el mismo schema de la fase "${params.stage}".
+
+Brief del episodio:
+${briefBlock(params.brief)}
+
+Contexto aprobado y material base:
+${JSON.stringify(params.context, null, 2)}
+
+Versión actual a ajustar:
+${JSON.stringify(params.currentArtifact, null, 2)}
+
+Instrucción del usuario:
+${params.instruction}
+
+Reglas generales:
+- Aplica la instrucción de forma concreta.
+- Mantén todo lo útil de la versión actual que no contradiga la instrucción.
+- No cambies la forma del JSON ni añadas campos fuera del schema.
+- Si la instrucción pide algo no soportado por el contexto factual, refleja la incertidumbre en los campos adecuados en vez de inventar.
+
+Reglas de esta fase:
+${adjustmentRules(params.stage, params.sourceId)}
+`.trim();
+
+  return generateStructured({
+    model: params.model,
+    stage: params.stage,
+    prompt,
+  });
 }
 
 export async function generateSourceExtraction(params: {
@@ -92,6 +194,7 @@ Reglas:
 - Trabaja solo con la fuente dada.
 - Los claims deben ser atómicos y concretos.
 - evidenceQuote debe ser una cita literal corta del texto fuente.
+- importance debe ser un número entero JSON entre 1 y 5, nunca texto.
 - mustKeep debe incluir solo lo que sería grave perder en un episodio sobre este tema.
 - Si hay sesgo, agenda o incertidumbre, señálalo sin dramatizar.
 - sourceId debe ser exactamente "${params.source.id}".

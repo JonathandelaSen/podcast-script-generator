@@ -4,10 +4,6 @@ import { Inter, Geist_Mono } from "next/font/google";
 import {
   AudioLinesIcon,
   FolderOpenIcon,
-  GitBranchPlusIcon,
-  HistoryIcon,
-  Settings2Icon,
-  SparklesIcon,
   WandSparklesIcon,
 } from "lucide-react";
 import "./globals.css";
@@ -67,37 +63,8 @@ export default function RootLayout({
             </div>
           </aside>
 
-          <header className="fixed top-0 right-0 z-40 hidden h-16 w-[calc(100%-4rem)] items-center justify-between border-b border-slate-200/20 bg-white/80 px-8 shadow-sm backdrop-blur-md lg:flex">
-            <div className="flex items-center gap-8">
-              <span className="text-xl font-bold tracking-tight text-slate-900">ScriptArchitect</span>
-              <nav className="hidden items-center gap-6 text-[0.875rem] font-medium md:flex">
-                <span className="cursor-default pb-2 text-slate-500 transition-colors hover:text-indigo-500">Extraction</span>
-                <span className="cursor-default pb-2 text-slate-500 transition-colors hover:text-indigo-500">Consolidation</span>
-                <span className="cursor-default pb-2 text-slate-500 transition-colors hover:text-indigo-500">Outline</span>
-                <span className="cursor-default pb-2 text-slate-500 transition-colors hover:text-indigo-500">Script</span>
-                <span className="cursor-default pb-2 text-slate-500 transition-colors hover:text-indigo-500">Audit</span>
-              </nav>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <button className="flex items-center gap-2 text-[0.875rem] text-slate-500 transition-colors duration-150 hover:text-indigo-500">
-                <HistoryIcon className="size-5" />
-                <span>History</span>
-              </button>
-              <button className="primary-gradient rounded-lg px-5 py-2 text-[0.875rem] font-semibold text-white transition-transform duration-150 hover:-translate-y-0.5">
-                Approve Stage
-              </button>
-              <div className="mx-2 h-6 w-px bg-[rgba(199,196,216,0.32)]" />
-              <div className="flex items-center gap-2 text-slate-500">
-                <Settings2Icon className="size-4 cursor-default transition-colors hover:text-indigo-500" />
-                <SparklesIcon className="size-4 cursor-default transition-colors hover:text-indigo-500" />
-                <WandSparklesIcon className="size-4 cursor-default transition-colors hover:text-indigo-500" />
-              </div>
-            </div>
-          </header>
-
           <div className="relative min-h-screen lg:ml-16">
-            <div className="mx-auto min-h-screen w-full px-4 py-6 sm:px-6 lg:px-8 lg:pt-24 lg:pb-12">
+            <div className="mx-auto min-h-screen w-full px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
               {children}
             </div>
           </div>

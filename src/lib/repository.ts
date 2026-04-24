@@ -344,6 +344,28 @@ export async function approveArtifact(artifactId: string) {
     .where(eq(artifactsTable.id, artifactId));
 }
 
+export async function unapproveArtifact(artifactId: string) {
+  await databaseReady;
+  const artifact = await getArtifactById(artifactId);
+
+  if (!artifact) {
+    return null;
+  }
+
+  const nextStatus: ArtifactStatus =
+    artifact.currentContent === artifact.originalContent ? "generated" : "edited";
+
+  await db
+    .update(artifactsTable)
+    .set({
+      status: nextStatus,
+      updatedAt: nowIso(),
+    })
+    .where(eq(artifactsTable.id, artifactId));
+
+  return nextStatus;
+}
+
 export async function getArtifactById(artifactId: string) {
   await databaseReady;
   const artifact = await db.query.artifactsTable.findFirst({

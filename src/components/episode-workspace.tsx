@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { diffLines, diffWordsWithSpace, type Change } from "diff";
 import ReactMarkdown from "react-markdown";
 import {
+  BadgeCheckIcon,
   BoltIcon,
   CheckCheckIcon,
   DatabaseIcon,
@@ -18,11 +20,13 @@ import {
   ShieldCheckIcon,
   SparklesIcon,
   Trash2Icon,
+  XCircleIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import {
   addSourceAction,
+  adjustArtifactAction,
   approveArtifactAction,
   deleteSourceAction,
   generateAuditAction,
@@ -33,9 +37,9 @@ import {
   revertArtifactAction,
   saveArtifactAction,
   saveSourceAction,
+  unapproveArtifactAction,
   updateEpisodeModelAction,
 } from "@/app/actions";
-import { getPromptVersion } from "@/lib/gemini";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -94,7 +98,55 @@ type ActionResult = {
   message: string;
 };
 
+type ActionFeedback = ActionResult & {
+  title: string;
+};
+
+type ActionKind = "default" | "generation";
+
+type PendingAction = {
+  id: string;
+  label: string;
+  kind: ActionKind;
+};
+
+type RunActionOptions = {
+  id: string;
+  pendingLabel: string;
+  successTitle: string;
+  failureTitle: string;
+  kind?: ActionKind;
+};
+
+type RunAction = (
+  options: RunActionOptions,
+  runner: () => Promise<ActionResult>,
+) => void;
+
 type PhaseKey = "sources" | ArtifactStageKey;
+type ArtifactViewMode = "edit" | "preview" | "compare";
+type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+type ArtifactVersionState = {
+  selectedArtifactIds: Record<string, string>;
+  compareArtifactIds: Record<string, string>;
+  artifactViewModes: Record<string, ArtifactViewMode>;
+  onSelectArtifact: (scopeKey: string, artifactId: string) => void;
+  onSelectCompareArtifact: (scopeKey: string, artifactId: string) => void;
+  onSelectViewMode: (scopeKey: string, mode: ArtifactViewMode) => void;
+};
+
+type DiffRow =
+  | { kind: "same"; before: string; after: string }
+  | { kind: "changed"; before: string; after: string }
+  | { kind: "removed"; before: string; after: null }
+  | { kind: "added"; before: null; after: string };
 
 const PHASES: Array<{
   key: PhaseKey;
@@ -133,11 +185,28 @@ const PHASES: Array<{
   },
 ];
 
+const AI_ADJUSTMENT_PLACEHOLDERS: Record<ArtifactStageKey, string> = {
+  extraction:
+    "Ej: incluye esta anécdota en sourceSummary y mustKeep, manteniendo las citas literales...",
+  consolidation:
+    "Ej: refuerza el ángulo sobre el impacto económico y conserva los mustCoverClaimRefs...",
+  outline:
+    "Ej: abre con una escena más concreta y mueve la contradicción al segundo bloque...",
+  script:
+    "Ej: refuerza la apertura, conserva todos los claims cubiertos y añade esta anécdota...",
+  audit:
+    "Ej: revisa con más dureza la cobertura de fuentes secundarias y sugiere reparaciones concretas...",
+};
+
 function getArtifactsForStage(artifacts: ArtifactRow[], stage: ArtifactStageKey, sourceId?: string) {
   return artifacts.filter(
     (artifact) =>
       artifact.stage === stage &&
-      (sourceId ? artifact.sourceId === sourceId : artifact.sourceId === null),
+      (sourceId
+        ? artifact.sourceId === sourceId
+        : stage === "extraction"
+          ? artifact.sourceId !== null
+          : artifact.sourceId === null),
   );
 }
 
@@ -149,17 +218,171 @@ function getLatestApprovedArtifact(artifacts: ArtifactRow[]) {
   return artifacts.find((artifact) => artifact.status === "approved") ?? null;
 }
 
+function getVersionScopeKey(stage: ArtifactStageKey, sourceId?: string | null) {
+  return stage === "extraction" && sourceId
+    ? `${stage}:${sourceId}`
+    : `${stage}:stage`;
+}
+
+function getSelectedArtifact(artifacts: ArtifactRow[], selectedArtifactId?: string) {
+  return artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? artifacts[0] ?? null;
+}
+
+function getVersionLabel(artifact: ArtifactRow, artifacts: ArtifactRow[]) {
+  const index = artifacts.findIndex((item) => item.id === artifact.id);
+  const versionNumber = index >= 0 ? artifacts.length - index : artifacts.length;
+  const status = summarizeArtifactStatus(artifact.status);
+  return `v${versionNumber} · ${status} · ${formatDateTime(artifact.createdAt)}`;
+}
+
+function getDefaultCompareArtifact(
+  artifacts: ArtifactRow[],
+  activeArtifact: ArtifactRow | null,
+) {
+  if (!activeArtifact || artifacts.length < 2) {
+    return null;
+  }
+
+  const activeIndex = artifacts.findIndex((artifact) => artifact.id === activeArtifact.id);
+  const adjacentOlder = activeIndex >= 0 ? artifacts[activeIndex + 1] : null;
+  const adjacentNewer = activeIndex > 0 ? artifacts[activeIndex - 1] : null;
+  return adjacentOlder ?? adjacentNewer ?? null;
+}
+
+function getCompareArtifact(
+  artifacts: ArtifactRow[],
+  activeArtifact: ArtifactRow | null,
+  compareArtifactId?: string,
+) {
+  if (!activeArtifact) {
+    return null;
+  }
+
+  const selected = artifacts.find(
+    (artifact) => artifact.id === compareArtifactId && artifact.id !== activeArtifact.id,
+  );
+
+  return selected ?? getDefaultCompareArtifact(artifacts, activeArtifact);
+}
+
+function splitDiffLines(change: Pick<Change, "value">) {
+  const lines = change.value.split("\n");
+
+  if (lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+
+  return lines.length > 0 ? lines : [""];
+}
+
+function stringifyJsonForDiff(content: string) {
+  try {
+    return JSON.stringify(JSON.parse(content), null, 2);
+  } catch {
+    return content;
+  }
+}
+
+function getArtifactDiffText(stage: ArtifactStageKey, artifact: ArtifactRow) {
+  if (stage !== "script") {
+    return stringifyJsonForDiff(artifact.currentContent);
+  }
+
+  try {
+    const script = parseArtifactContent("script", artifact.currentContent) as ScriptDraft;
+    return [`# ${script.title}`, "", script.scriptMarkdown].join("\n");
+  } catch {
+    return artifact.currentContent;
+  }
+}
+
+function getArtifactPreviewTitle(stage: ArtifactStageKey, artifact: ArtifactRow) {
+  if (stage !== "script") {
+    return STAGE_LABELS[stage];
+  }
+
+  try {
+    return (parseArtifactContent("script", artifact.currentContent) as ScriptDraft).title;
+  } catch {
+    return "Guion";
+  }
+}
+
+function buildDiffRows(changes: Change[]) {
+  const rows: DiffRow[] = [];
+
+  for (let index = 0; index < changes.length; index += 1) {
+    const change = changes[index];
+    const nextChange = changes[index + 1];
+
+    if (change.removed && nextChange?.added) {
+      rows.push({
+        kind: "changed",
+        before: change.value,
+        after: nextChange.value,
+      });
+      index += 1;
+      continue;
+    }
+
+    if (change.added) {
+      rows.push({ kind: "added", before: null, after: change.value });
+      continue;
+    }
+
+    if (change.removed) {
+      rows.push({ kind: "removed", before: change.value, after: null });
+      continue;
+    }
+
+    rows.push({
+      kind: "same",
+      before: change.value,
+      after: change.value,
+    });
+  }
+
+  return rows;
+}
+
+function renderChangedText(before: string, after: string, side: "before" | "after") {
+  return diffWordsWithSpace(before, after)
+    .filter((change) => (side === "before" ? !change.added : !change.removed))
+    .map((change, index) => (
+      <span
+        key={index}
+        className={cn(
+          side === "before" &&
+            change.removed &&
+            "rounded bg-[rgba(255,218,214,0.82)] px-0.5 text-[#93000a] line-through decoration-[#93000a]/70",
+          side === "after" &&
+            change.added &&
+            "rounded bg-[rgba(214,244,224,0.9)] px-0.5 text-[#0f5f34]",
+        )}
+      >
+        {change.value}
+      </span>
+    ));
+}
+
 function SourceEditor({
   episodeId,
   source,
   canDelete,
+  pendingActionId,
   onRunAction,
 }: {
   episodeId: string;
   source: SourceRow;
   canDelete: boolean;
-  onRunAction: (runner: () => Promise<ActionResult>) => void;
+  pendingActionId: string | null;
+  onRunAction: RunAction;
 }) {
+  const saveActionId = `save-source-${source.id}`;
+  const deleteActionId = `delete-source-${source.id}`;
+  const saving = pendingActionId === saveActionId;
+  const deleting = pendingActionId === deleteActionId;
+
   return (
     <section className="rounded-[24px] border border-[rgba(199,196,216,0.12)] bg-white/96 p-5 shadow-[0_12px_24px_rgba(13,28,46,0.04)]">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -182,7 +405,15 @@ function SourceEditor({
       <form
         className="mt-5 flex flex-col gap-5"
         action={(formData) =>
-          onRunAction(() => saveSourceAction(formData))
+          onRunAction(
+            {
+              id: saveActionId,
+              pendingLabel: "Guardando fuente",
+              successTitle: "Fuente guardada",
+              failureTitle: "No se pudo guardar la fuente",
+            },
+            () => saveSourceAction(formData),
+          )
         }
       >
         <input type="hidden" name="episodeId" value={episodeId} />
@@ -202,25 +433,41 @@ function SourceEditor({
         </FieldShell>
 
         <div className="flex flex-wrap justify-between gap-3">
-          <Button type="submit" variant="outline">
-            <SaveIcon data-icon="inline-start" />
+          <Button type="submit" variant="outline" disabled={saving}>
+            {saving ? (
+              <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+            ) : (
+              <SaveIcon data-icon="inline-start" />
+            )}
             Guardar fuente
           </Button>
 
           <Button
             type="button"
             variant="ghost"
-            disabled={!canDelete}
+            disabled={!canDelete || deleting}
             onClick={() =>
-              onRunAction(async () => {
-                const formData = new FormData();
-                formData.set("episodeId", episodeId);
-                formData.set("sourceId", source.id);
-                return deleteSourceAction(formData);
-              })
+              onRunAction(
+                {
+                  id: deleteActionId,
+                  pendingLabel: "Eliminando fuente",
+                  successTitle: "Fuente eliminada",
+                  failureTitle: "No se pudo eliminar la fuente",
+                },
+                async () => {
+                  const formData = new FormData();
+                  formData.set("episodeId", episodeId);
+                  formData.set("sourceId", source.id);
+                  return deleteSourceAction(formData);
+                },
+              )
             }
           >
-            <Trash2Icon data-icon="inline-start" />
+            {deleting ? (
+              <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+            ) : (
+              <Trash2Icon data-icon="inline-start" />
+            )}
             Eliminar
           </Button>
         </div>
@@ -233,33 +480,55 @@ function ModelSelector({
   episodeId,
   stage,
   value,
+  pendingActionId,
   onRunAction,
 }: {
   episodeId: string;
   stage: ArtifactStageKey;
   value: string;
-  onRunAction: (runner: () => Promise<ActionResult>) => void;
+  pendingActionId: string | null;
+  onRunAction: RunAction;
 }) {
+  const actionId = `model-${stage}`;
+  const updating = pendingActionId === actionId;
+
   return (
     <div className="rounded-[24px] border border-[rgba(199,196,216,0.12)] bg-white/90 p-5">
-      <p className="editorial-kicker">Inference Model</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="editorial-kicker">Inference Model</p>
+        {updating ? (
+          <Badge variant="secondary">
+            <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+            Guardando
+          </Badge>
+        ) : null}
+      </div>
       <p className="mt-2 text-sm leading-6 text-muted-foreground">
         Selecciona el modelo que generará la salida de esta fase.
       </p>
       <div className="mt-3">
         <Select
           value={value}
+          disabled={updating}
           onValueChange={(nextValue) =>
-            onRunAction(async () => {
-              if (!nextValue) {
-                return { ok: false, message: "Selecciona un modelo válido." };
-              }
-              const formData = new FormData();
-              formData.set("episodeId", episodeId);
-              formData.set("stage", stage);
-              formData.set("model", nextValue);
-              return updateEpisodeModelAction(formData);
-            })
+            onRunAction(
+              {
+                id: actionId,
+                pendingLabel: "Guardando modelo",
+                successTitle: "Modelo actualizado",
+                failureTitle: "No se pudo actualizar el modelo",
+              },
+              async () => {
+                if (!nextValue) {
+                  return { ok: false, message: "Selecciona un modelo válido." };
+                }
+                const formData = new FormData();
+                formData.set("episodeId", episodeId);
+                formData.set("stage", stage);
+                formData.set("model", nextValue);
+                return updateEpisodeModelAction(formData);
+              },
+            )
           }
         >
           <SelectTrigger className="w-full">
@@ -284,12 +553,18 @@ function HistoryDialog({
   episodeId,
   stage,
   artifacts,
+  activeArtifactId,
+  pendingActionId,
+  onSelectArtifact,
   onRunAction,
 }: {
   episodeId: string;
   stage: ArtifactStageKey;
   artifacts: ArtifactRow[];
-  onRunAction: (runner: () => Promise<ActionResult>) => void;
+  activeArtifactId: string | null;
+  pendingActionId: string | null;
+  onSelectArtifact: (artifactId: string) => void;
+  onRunAction: RunAction;
 }) {
   return (
     <Dialog>
@@ -308,6 +583,7 @@ function HistoryDialog({
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead>Versión</TableHead>
                 <TableHead>Fecha</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead>Modelo</TableHead>
@@ -317,22 +593,47 @@ function HistoryDialog({
             <TableBody>
               {artifacts.map((artifact) => (
                 <TableRow key={artifact.id}>
+                  <TableCell className="font-semibold">
+                    v{artifacts.length - artifacts.findIndex((item) => item.id === artifact.id)}
+                  </TableCell>
                   <TableCell>{formatDateTime(artifact.createdAt)}</TableCell>
                   <TableCell>{summarizeArtifactStatus(artifact.status)}</TableCell>
                   <TableCell>{artifact.modelName ?? "Manual"}</TableCell>
                   <TableCell className="text-right">
                     <Button
+                      type="button"
+                      variant={artifact.id === activeArtifactId ? "secondary" : "ghost"}
+                      disabled={artifact.id === activeArtifactId}
+                      onClick={() => onSelectArtifact(artifact.id)}
+                    >
+                      Ver
+                    </Button>
+                    <Button
+                      type="button"
                       variant="ghost"
+                      disabled={pendingActionId === `revert-artifact-${artifact.id}`}
                       onClick={() =>
-                        onRunAction(async () => {
-                          const formData = new FormData();
-                          formData.set("episodeId", episodeId);
-                          formData.set("artifactId", artifact.id);
-                          return revertArtifactAction(formData);
-                        })
+                        onRunAction(
+                          {
+                            id: `revert-artifact-${artifact.id}`,
+                            pendingLabel: "Revirtiendo versión",
+                            successTitle: "Versión revertida",
+                            failureTitle: "No se pudo revertir la versión",
+                          },
+                          async () => {
+                            const formData = new FormData();
+                            formData.set("episodeId", episodeId);
+                            formData.set("artifactId", artifact.id);
+                            return revertArtifactAction(formData);
+                          },
+                        )
                       }
                     >
-                      <RefreshCcwIcon data-icon="inline-start" />
+                      {pendingActionId === `revert-artifact-${artifact.id}` ? (
+                        <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+                      ) : (
+                        <RefreshCcwIcon data-icon="inline-start" />
+                      )}
                       Revertir
                     </Button>
                   </TableCell>
@@ -346,8 +647,401 @@ function HistoryDialog({
   );
 }
 
+function ArtifactVersionToolbar({
+  scopeKey,
+  stage,
+  artifacts,
+  activeArtifact,
+  compareArtifact,
+  viewMode,
+  onSelectArtifact,
+  onSelectCompareArtifact,
+  onSelectViewMode,
+}: {
+  scopeKey: string;
+  stage: ArtifactStageKey;
+  artifacts: ArtifactRow[];
+  activeArtifact: ArtifactRow;
+  compareArtifact: ArtifactRow | null;
+  viewMode: ArtifactViewMode;
+  onSelectArtifact: (scopeKey: string, artifactId: string) => void;
+  onSelectCompareArtifact: (scopeKey: string, artifactId: string) => void;
+  onSelectViewMode: (scopeKey: string, mode: ArtifactViewMode) => void;
+}) {
+  const canCompare = artifacts.length > 1 && Boolean(compareArtifact);
+
+  return (
+    <div className="rounded-[26px] border border-[rgba(199,196,216,0.14)] bg-white/82 p-4 shadow-[0_10px_24px_rgba(13,28,46,0.04)]">
+      <div className="grid gap-4 xl:grid-cols-[minmax(220px,0.42fr)_minmax(220px,0.42fr)_auto] xl:items-end">
+        <div>
+          <p className="editorial-kicker">Versión activa</p>
+          <Select
+            value={activeArtifact.id}
+            onValueChange={(artifactId) => {
+              if (artifactId) {
+                onSelectArtifact(scopeKey, artifactId);
+              }
+            }}
+          >
+            <SelectTrigger className="mt-2 w-full">
+              <SelectValue>{getVersionLabel(activeArtifact, artifacts)}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {artifacts.map((artifact) => (
+                  <SelectItem key={artifact.id} value={artifact.id}>
+                    {getVersionLabel(artifact, artifacts)}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div>
+          <p className="editorial-kicker">Comparar con</p>
+          <Select
+            value={compareArtifact?.id ?? "none"}
+            disabled={!canCompare}
+            onValueChange={(artifactId) => {
+              if (artifactId) {
+                onSelectCompareArtifact(scopeKey, artifactId);
+              }
+            }}
+          >
+            <SelectTrigger className="mt-2 w-full">
+              <SelectValue>
+                {compareArtifact
+                  ? getVersionLabel(compareArtifact, artifacts)
+                  : "Sin versión comparable"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {artifacts
+                  .filter((artifact) => artifact.id !== activeArtifact.id)
+                  .map((artifact) => (
+                    <SelectItem key={artifact.id} value={artifact.id}>
+                      {getVersionLabel(artifact, artifacts)}
+                    </SelectItem>
+                  ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <Tabs
+          value={viewMode}
+          onValueChange={(value) =>
+            onSelectViewMode(scopeKey, value as ArtifactViewMode)
+          }
+          className="min-w-0"
+        >
+          <TabsList className="h-10 w-full rounded-2xl bg-[rgba(239,244,255,0.92)] p-1 xl:w-fit">
+            <TabsTrigger value="edit" className="px-3">
+              Editar
+            </TabsTrigger>
+            <TabsTrigger value="preview" className="px-3">
+              Vista
+            </TabsTrigger>
+            <TabsTrigger value="compare" className="px-3" disabled={!canCompare}>
+              Comparar
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="edit" className="hidden" />
+          <TabsContent value="preview" className="hidden" />
+          <TabsContent value="compare" className="hidden" />
+        </Tabs>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Badge variant="outline">{STAGE_LABELS[stage]}</Badge>
+        <Badge variant="secondary">{summarizeArtifactStatus(activeArtifact.status)}</Badge>
+        {activeArtifact.modelName ? (
+          <Badge variant="secondary">{activeArtifact.modelName}</Badge>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function DiffColumn({
+  title,
+  label,
+  rows,
+  side,
+}: {
+  title: string;
+  label: string;
+  rows: DiffRow[];
+  side: "before" | "after";
+}) {
+  return (
+    <div className="min-w-0 rounded-[24px] border border-[rgba(199,196,216,0.14)] bg-white/88">
+      <div className="border-b border-[rgba(199,196,216,0.14)] px-4 py-3">
+        <p className="editorial-kicker">{label}</p>
+        <p className="mt-1 truncate text-sm font-semibold text-foreground">{title}</p>
+      </div>
+      <div className="max-h-[62vh] min-h-[24rem] overflow-y-auto overscroll-contain p-4 pr-2">
+        <div className="min-w-full whitespace-pre-wrap break-words pb-8 pr-2 font-mono text-xs leading-6 text-foreground">
+          {rows.map((row, rowIndex) => {
+            const text = side === "before" ? row.before : row.after;
+
+            if (text === null) {
+              return (
+                <div
+                  key={rowIndex}
+                  className="min-h-6 rounded-lg px-2 text-muted-foreground/45"
+                >
+                  {" "}
+                </div>
+              );
+            }
+
+            if (row.kind === "changed") {
+              return (
+                <div
+                  key={rowIndex}
+                  className="my-1 rounded-xl bg-[rgba(239,244,255,0.72)] px-2 py-1"
+                >
+                  {renderChangedText(row.before, row.after, side)}
+                </div>
+              );
+            }
+
+            const changed =
+              (row.kind === "removed" && side === "before") ||
+              (row.kind === "added" && side === "after");
+            const tone =
+              row.kind === "removed" && side === "before"
+                ? "bg-[rgba(255,218,214,0.72)] text-[#93000a]"
+                : row.kind === "added" && side === "after"
+                  ? "bg-[rgba(214,244,224,0.82)] text-[#0f5f34]"
+                  : "text-foreground";
+
+            return splitDiffLines({ value: text }).map((line, lineIndex) => (
+              <div
+                key={`${rowIndex}-${lineIndex}`}
+                className={cn(
+                  "min-h-6 rounded-lg px-2",
+                  changed ? tone : "hover:bg-[rgba(239,244,255,0.5)]",
+                )}
+              >
+                {line || " "}
+              </div>
+            ));
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WordDiffLine({
+  before,
+  after,
+}: {
+  before: string;
+  after: string;
+}) {
+  const changes = diffWordsWithSpace(before, after);
+
+  return (
+    <div className="rounded-[22px] border border-[rgba(199,196,216,0.14)] bg-[rgba(248,249,255,0.72)] p-4 text-sm leading-7">
+      <p className="editorial-kicker">Cambio de título</p>
+      <p className="mt-2">
+        {changes.map((change, index) => (
+          <span
+            key={index}
+            className={cn(
+              change.added && "rounded bg-[rgba(214,244,224,0.9)] px-1 text-[#0f5f34]",
+              change.removed && "rounded bg-[rgba(255,218,214,0.8)] px-1 text-[#93000a] line-through",
+            )}
+          >
+            {change.value}
+          </span>
+        ))}
+      </p>
+    </div>
+  );
+}
+
+function ArtifactDiffViewer({
+  stage,
+  beforeArtifact,
+  afterArtifact,
+  artifacts,
+}: {
+  stage: ArtifactStageKey;
+  beforeArtifact: ArtifactRow;
+  afterArtifact: ArtifactRow;
+  artifacts: ArtifactRow[];
+}) {
+  const beforeText = getArtifactDiffText(stage, beforeArtifact);
+  const afterText = getArtifactDiffText(stage, afterArtifact);
+  const changes = diffLines(beforeText, afterText);
+  const rows = buildDiffRows(changes);
+
+  return (
+    <div className="space-y-4">
+      {stage === "script" ? (
+        <WordDiffLine
+          before={getArtifactPreviewTitle(stage, beforeArtifact)}
+          after={getArtifactPreviewTitle(stage, afterArtifact)}
+        />
+      ) : null}
+      <div className="grid min-h-0 gap-4 xl:grid-cols-2">
+        <DiffColumn
+          title={getVersionLabel(beforeArtifact, artifacts)}
+          label="Anterior"
+          rows={rows}
+          side="before"
+        />
+        <DiffColumn
+          title={getVersionLabel(afterArtifact, artifacts)}
+          label="Activa"
+          rows={rows}
+          side="after"
+        />
+      </div>
+    </div>
+  );
+}
+
+function ArtifactReadOnlyPreview({
+  stage,
+  artifact,
+}: {
+  stage: ArtifactStageKey;
+  artifact: ArtifactRow;
+}) {
+  if (stage !== "script") {
+    return (
+      <div className="rounded-[28px] border border-[rgba(199,196,216,0.12)] bg-white/94 p-5 shadow-[0_10px_24px_rgba(13,28,46,0.04)]">
+        <VisualJsonViewer content={artifact.currentContent} />
+      </div>
+    );
+  }
+
+  let script: ScriptDraft;
+  try {
+    script = parseArtifactContent("script", artifact.currentContent) as ScriptDraft;
+  } catch (error) {
+    return (
+      <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-6 text-sm text-destructive">
+        Error al procesar el guion: {String(error)}
+      </div>
+    );
+  }
+
+  return (
+    <Card className="bg-[rgba(255,255,255,0.78)]">
+      <CardHeader>
+        <p className="editorial-kicker">Vista de lectura</p>
+        <CardTitle>{script.title}</CardTitle>
+        <CardDescription>
+          Versión seleccionada renderizada sin controles de edición.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="prose prose-neutral max-w-none text-sm leading-7">
+        <ReactMarkdown>{script.scriptMarkdown}</ReactMarkdown>
+      </CardContent>
+    </Card>
+  );
+}
+
+function VersionedArtifactPanel({
+  episodeId,
+  stage,
+  artifacts,
+  pendingActionId,
+  versionState,
+  onRunAction,
+}: {
+  episodeId: string;
+  stage: ArtifactStageKey;
+  artifacts: ArtifactRow[];
+  pendingActionId: string | null;
+  versionState: ArtifactVersionState;
+  onRunAction: RunAction;
+}) {
+  const scopeKey = getVersionScopeKey(stage, artifacts[0]?.sourceId);
+  const activeArtifact = getSelectedArtifact(
+    artifacts,
+    versionState.selectedArtifactIds[scopeKey],
+  );
+
+  if (!activeArtifact) {
+    return null;
+  }
+
+  const compareArtifact = getCompareArtifact(
+    artifacts,
+    activeArtifact,
+    versionState.compareArtifactIds[scopeKey],
+  );
+  const requestedMode = versionState.artifactViewModes[scopeKey] ?? "edit";
+  const viewMode =
+    requestedMode === "compare" && !compareArtifact ? "edit" : requestedMode;
+
+  const handleSelectArtifact = (scope: string, artifactId: string) => {
+    versionState.onSelectArtifact(scope, artifactId);
+
+    if (versionState.compareArtifactIds[scope] === artifactId) {
+      const nextActiveArtifact = artifacts.find((artifact) => artifact.id === artifactId) ?? null;
+      const nextCompareArtifact = getDefaultCompareArtifact(artifacts, nextActiveArtifact);
+      if (nextCompareArtifact) {
+        versionState.onSelectCompareArtifact(scope, nextCompareArtifact.id);
+      }
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <ArtifactVersionToolbar
+        scopeKey={scopeKey}
+        stage={stage}
+        artifacts={artifacts}
+        activeArtifact={activeArtifact}
+        compareArtifact={compareArtifact}
+        viewMode={viewMode}
+        onSelectArtifact={handleSelectArtifact}
+        onSelectCompareArtifact={versionState.onSelectCompareArtifact}
+        onSelectViewMode={versionState.onSelectViewMode}
+      />
+
+      {viewMode === "compare" && compareArtifact ? (
+        <ArtifactDiffViewer
+          stage={stage}
+          beforeArtifact={compareArtifact}
+          afterArtifact={activeArtifact}
+          artifacts={artifacts}
+        />
+      ) : viewMode === "preview" ? (
+        <ArtifactReadOnlyPreview stage={stage} artifact={activeArtifact} />
+      ) : stage === "script" ? (
+        <ScriptArtifactEditor
+          key={activeArtifact.id}
+          episodeId={episodeId}
+          artifact={activeArtifact}
+          pendingActionId={pendingActionId}
+          onRunAction={onRunAction}
+        />
+      ) : (
+        <JsonArtifactEditor
+          key={activeArtifact.id}
+          episodeId={episodeId}
+          artifact={activeArtifact}
+          pendingActionId={pendingActionId}
+          onRunAction={onRunAction}
+        />
+      )}
+    </div>
+  );
+}
+
 function VisualJsonViewer({ content }: { content: string }) {
-  let data: any;
+  let data: JsonValue;
   try {
     data = JSON.parse(content);
   } catch (e) {
@@ -358,7 +1052,7 @@ function VisualJsonViewer({ content }: { content: string }) {
     );
   }
 
-  const renderValue = (value: any, keyPath: string): React.ReactNode => {
+  const renderValue = (value: JsonValue, keyPath: string): React.ReactNode => {
     if (value === null) return <span className="text-muted-foreground">null</span>;
     if (typeof value === "boolean") return <Badge variant="outline">{value ? "true" : "false"}</Badge>;
     if (typeof value === "string") return <span className="break-words text-foreground">{value}</span>;
@@ -379,7 +1073,8 @@ function VisualJsonViewer({ content }: { content: string }) {
     }
     
     if (typeof value === "object") {
-      const keys = Object.keys(value);
+      const objectValue = value;
+      const keys = Object.keys(objectValue);
       if (keys.length === 0) return <span className="text-muted-foreground">{}</span>;
       
       return (
@@ -387,7 +1082,7 @@ function VisualJsonViewer({ content }: { content: string }) {
           {keys.map((k) => (
             <div key={`${keyPath}-${k}`} className="rounded-xl bg-[rgba(239,244,255,0.4)] p-3 shadow-sm">
               <p className="mb-1 text-[0.7rem] font-bold text-[#454386]">{k}</p>
-              <div className="pl-1 text-sm">{renderValue(value[k], `${keyPath}-${k}`)}</div>
+              <div className="pl-1 text-sm">{renderValue(objectValue[k], `${keyPath}-${k}`)}</div>
             </div>
           ))}
         </div>
@@ -404,19 +1099,222 @@ function VisualJsonViewer({ content }: { content: string }) {
   );
 }
 
+function AIAdjustmentPanel({
+  episodeId,
+  artifact,
+  pendingActionId,
+  onRunAction,
+  compact = false,
+}: {
+  episodeId: string;
+  artifact: ArtifactRow;
+  pendingActionId: string | null;
+  onRunAction: RunAction;
+  compact?: boolean;
+}) {
+  const [instruction, setInstruction] = useState("");
+  const actionId = `adjust-artifact-${artifact.id}`;
+  const adjusting = pendingActionId === actionId;
+  const disabled = adjusting || !instruction.trim();
+
+  return (
+    <div
+      className={cn(
+        "rounded-[24px] border border-[rgba(53,37,205,0.14)] bg-[rgba(239,244,255,0.78)] p-4",
+        compact ? "shadow-none" : "shadow-[0_12px_24px_rgba(53,37,205,0.06)]",
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="editorial-kicker">Ajustes IA</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">
+            Crear una nueva versión
+          </p>
+        </div>
+        {adjusting ? (
+          <Badge variant="secondary">
+            <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+            Ajustando
+          </Badge>
+        ) : null}
+      </div>
+
+      <Textarea
+        value={instruction}
+        onChange={(event) => setInstruction(event.target.value)}
+        placeholder={AI_ADJUSTMENT_PLACEHOLDERS[artifact.stage]}
+        className={cn(
+          "mt-3 rounded-[20px] bg-white/90",
+          compact ? "min-h-28" : "min-h-32",
+        )}
+        disabled={adjusting}
+      />
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs font-medium text-muted-foreground">
+          La versión actual queda intacta.
+        </p>
+        <Button
+          type="button"
+          disabled={disabled}
+          onClick={() =>
+            onRunAction(
+              {
+                id: actionId,
+                pendingLabel: "Ajustando con IA",
+                successTitle: "Ajuste generado",
+                failureTitle: "No se pudo ajustar la versión",
+                kind: "generation",
+              },
+              async () => {
+                const formData = new FormData();
+                formData.set("episodeId", episodeId);
+                formData.set("artifactId", artifact.id);
+                formData.set("instruction", instruction);
+                const result = await adjustArtifactAction(formData);
+
+                if (result.ok) {
+                  setInstruction("");
+                }
+
+                return result;
+              },
+            )
+          }
+        >
+          {adjusting ? (
+            <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+          ) : (
+            <SparklesIcon data-icon="inline-start" />
+          )}
+          Ajustar con IA
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ArtifactApprovalControl({
+  episodeId,
+  artifact,
+  pendingActionId,
+  onRunAction,
+  approveLabel,
+  approvePendingLabel,
+  approveSuccessTitle,
+  approveFailureTitle,
+}: {
+  episodeId: string;
+  artifact: ArtifactRow;
+  pendingActionId: string | null;
+  onRunAction: RunAction;
+  approveLabel: string;
+  approvePendingLabel: string;
+  approveSuccessTitle: string;
+  approveFailureTitle: string;
+}) {
+  const approveActionId = `approve-artifact-${artifact.id}`;
+  const unapproveActionId = `unapprove-artifact-${artifact.id}`;
+  const approving = pendingActionId === approveActionId;
+  const unapproving = pendingActionId === unapproveActionId;
+  const approved = artifact.status === "approved";
+
+  const buildFormData = () => {
+    const formData = new FormData();
+    formData.set("episodeId", episodeId);
+    formData.set("artifactId", artifact.id);
+    return formData;
+  };
+
+  if (approved) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[rgba(53,37,205,0.14)] bg-[rgba(239,244,255,0.82)] px-3 py-2">
+        <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary">
+          <BadgeCheckIcon className="size-4" />
+          Aprobada
+        </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={unapproving}
+          onClick={() =>
+            onRunAction(
+              {
+                id: unapproveActionId,
+                pendingLabel: "Desaprobando versión",
+                successTitle: "Versión desaprobada",
+                failureTitle: "No se pudo desaprobar la versión",
+              },
+              () => unapproveArtifactAction(buildFormData()),
+            )
+          }
+        >
+          {unapproving ? (
+            <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+          ) : (
+            <XCircleIcon data-icon="inline-start" />
+          )}
+          Desaprobar
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <Button
+      type="button"
+      disabled={approving}
+      onClick={() =>
+        onRunAction(
+          {
+            id: approveActionId,
+            pendingLabel: approvePendingLabel,
+            successTitle: approveSuccessTitle,
+            failureTitle: approveFailureTitle,
+          },
+          () => approveArtifactAction(buildFormData()),
+        )
+      }
+    >
+      {approving ? (
+        <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+      ) : (
+        <CheckCheckIcon data-icon="inline-start" />
+      )}
+      {approveLabel}
+    </Button>
+  );
+}
+
 function JsonArtifactEditor({
   episodeId,
   artifact,
+  pendingActionId,
   onRunAction,
 }: {
   episodeId: string;
   artifact: ArtifactRow;
-  onRunAction: (runner: () => Promise<ActionResult>) => void;
+  pendingActionId: string | null;
+  onRunAction: RunAction;
 }) {
+  const saveActionId = `save-artifact-${artifact.id}`;
+  const saving = pendingActionId === saveActionId;
+
   return (
     <form
       className="grid gap-4"
-      action={(formData) => onRunAction(() => saveArtifactAction(formData))}
+      action={(formData) =>
+        onRunAction(
+          {
+            id: saveActionId,
+            pendingLabel: "Guardando versión",
+            successTitle: "Versión guardada",
+            failureTitle: "No se pudo guardar la versión",
+          },
+          () => saveArtifactAction(formData),
+        )
+      }
     >
       <input type="hidden" name="episodeId" value={episodeId} />
       <input type="hidden" name="artifactId" value={artifact.id} />
@@ -430,24 +1328,24 @@ function JsonArtifactEditor({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="submit" variant="outline">
-              <SaveIcon data-icon="inline-start" />
+            <Button type="submit" variant="outline" disabled={saving}>
+              {saving ? (
+                <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <SaveIcon data-icon="inline-start" />
+              )}
               Guardar edición
             </Button>
-            <Button
-              type="button"
-              onClick={() =>
-                onRunAction(async () => {
-                  const formData = new FormData();
-                  formData.set("episodeId", episodeId);
-                  formData.set("artifactId", artifact.id);
-                  return approveArtifactAction(formData);
-                })
-              }
-            >
-              <CheckCheckIcon data-icon="inline-start" />
-              Aprobar
-            </Button>
+            <ArtifactApprovalControl
+              episodeId={episodeId}
+              artifact={artifact}
+              pendingActionId={pendingActionId}
+              onRunAction={onRunAction}
+              approveLabel="Aprobar"
+              approvePendingLabel="Aprobando versión"
+              approveSuccessTitle="Versión aprobada"
+              approveFailureTitle="No se pudo aprobar la versión"
+            />
           </div>
         </div>
 
@@ -467,6 +1365,16 @@ function JsonArtifactEditor({
             />
           </TabsContent>
         </Tabs>
+
+        <div className="mt-5">
+          <AIAdjustmentPanel
+            episodeId={episodeId}
+            artifact={artifact}
+            pendingActionId={pendingActionId}
+            onRunAction={onRunAction}
+            compact
+          />
+        </div>
       </div>
     </form>
   );
@@ -475,18 +1383,32 @@ function JsonArtifactEditor({
 function ScriptArtifactEditor({
   episodeId,
   artifact,
+  pendingActionId,
   onRunAction,
 }: {
   episodeId: string;
   artifact: ArtifactRow;
-  onRunAction: (runner: () => Promise<ActionResult>) => void;
+  pendingActionId: string | null;
+  onRunAction: RunAction;
 }) {
   const script = parseArtifactContent("script", artifact.currentContent) as ScriptDraft;
+  const saveActionId = `save-artifact-${artifact.id}`;
+  const saving = pendingActionId === saveActionId;
 
   return (
     <form
-      className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]"
-      action={(formData) => onRunAction(() => saveArtifactAction(formData))}
+      className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.32fr)] 2xl:grid-cols-[minmax(0,1fr)_minmax(380px,0.34fr)]"
+      action={(formData) =>
+        onRunAction(
+          {
+            id: saveActionId,
+            pendingLabel: "Guardando borrador",
+            successTitle: "Borrador guardado",
+            failureTitle: "No se pudo guardar el borrador",
+          },
+          () => saveArtifactAction(formData),
+        )
+      }
     >
       <input type="hidden" name="episodeId" value={episodeId} />
       <input type="hidden" name="artifactId" value={artifact.id} />
@@ -500,25 +1422,34 @@ function ScriptArtifactEditor({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="submit" variant="outline">
-              <SaveIcon data-icon="inline-start" />
+            <Button type="submit" variant="outline" disabled={saving}>
+              {saving ? (
+                <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <SaveIcon data-icon="inline-start" />
+              )}
               Guardar borrador
             </Button>
-            <Button
-              type="button"
-              onClick={() =>
-                onRunAction(async () => {
-                  const formData = new FormData();
-                  formData.set("episodeId", episodeId);
-                  formData.set("artifactId", artifact.id);
-                  return approveArtifactAction(formData);
-                })
-              }
-            >
-              <CheckCheckIcon data-icon="inline-start" />
-              Aprobar para auditoría
-            </Button>
+            <ArtifactApprovalControl
+              episodeId={episodeId}
+              artifact={artifact}
+              pendingActionId={pendingActionId}
+              onRunAction={onRunAction}
+              approveLabel="Aprobar para auditoría"
+              approvePendingLabel="Aprobando guion"
+              approveSuccessTitle="Guion aprobado"
+              approveFailureTitle="No se pudo aprobar el guion"
+            />
           </div>
+        </div>
+
+        <div className="mt-5">
+          <AIAdjustmentPanel
+            episodeId={episodeId}
+            artifact={artifact}
+            pendingActionId={pendingActionId}
+            onRunAction={onRunAction}
+          />
         </div>
 
         <div className="mt-5 flex flex-col gap-5">
@@ -561,11 +1492,11 @@ function StageStatusBadge({
   current: ArtifactRow | null;
 }) {
   if (!current) {
-    return <Badge variant="outline">Vacío</Badge>;
+    return <Badge variant="outline">Sin versión</Badge>;
   }
 
   if (approved) {
-    return <Badge>Aprobado</Badge>;
+    return <Badge>Aprobada</Badge>;
   }
 
   return <Badge variant="secondary">{summarizeArtifactStatus(current.status)}</Badge>;
@@ -605,6 +1536,186 @@ function MetaRow({
   );
 }
 
+function SourceReviewSelector({
+  episodeId,
+  sources,
+  extractionBySource,
+  activeSourceId,
+  onSelectSource,
+  pendingActionId,
+  versionState,
+  onRunAction,
+}: {
+  episodeId: string;
+  sources: SourceRow[];
+  extractionBySource: Map<string, ArtifactRow[]>;
+  activeSourceId: string;
+  onSelectSource: (sourceId: string) => void;
+  pendingActionId: string | null;
+  versionState: ArtifactVersionState;
+  onRunAction: RunAction;
+}) {
+  const activeSource =
+    sources.find((source) => source.id === activeSourceId) ?? sources[0] ?? null;
+
+  if (!activeSource) {
+    return (
+      <Alert>
+        <FileClockIcon />
+        <AlertTitle>Sin fuentes</AlertTitle>
+        <AlertDescription>
+          Añade una fuente antes de generar extracciones.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  const activeArtifacts = extractionBySource.get(activeSource.id) ?? [];
+  const latest = getLatestArtifact(activeArtifacts);
+  const scopeKey = getVersionScopeKey("extraction", activeSource.id);
+  const activeArtifact = getSelectedArtifact(
+    activeArtifacts,
+    versionState.selectedArtifactIds[scopeKey],
+  );
+
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(240px,0.32fr)_minmax(0,1fr)]">
+      <div className="rounded-[28px] border border-[rgba(199,196,216,0.14)] bg-[rgba(255,255,255,0.68)] p-3 shadow-[0_12px_28px_rgba(13,28,46,0.04)]">
+        <div className="px-2 pb-3 pt-1">
+          <p className="editorial-kicker">Fuentes</p>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Revisa y decide cada extracción individualmente.
+          </p>
+        </div>
+
+        <div className="flex gap-2 overflow-x-auto pb-1 xl:flex-col xl:overflow-visible xl:pb-0">
+          {sources.map((source) => {
+            const stageArtifacts = extractionBySource.get(source.id) ?? [];
+            const sourceLatest = getLatestArtifact(stageArtifacts);
+            const approved = Boolean(getLatestApprovedArtifact(stageArtifacts));
+            const active = activeSource.id === source.id;
+            const statusLabel = !sourceLatest
+              ? "Sin extracción"
+              : approved
+                ? "Aprobada"
+                : "Pendiente de aprobación";
+
+            return (
+              <button
+                key={source.id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => onSelectSource(source.id)}
+                className={cn(
+                  "min-w-[16rem] rounded-[22px] border p-4 text-left transition-all xl:min-w-0",
+                  active
+                    ? "border-transparent bg-white shadow-[0_16px_26px_rgba(13,28,46,0.08)]"
+                    : "border-[rgba(199,196,216,0.14)] bg-[rgba(248,249,255,0.72)] hover:bg-white/92",
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  <span
+                    className={cn(
+                      "mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-2xl",
+                      approved
+                        ? "bg-primary-fixed text-primary"
+                        : sourceLatest
+                          ? "bg-[rgba(255,247,214,0.96)] text-[#6f5400]"
+                          : "bg-[rgba(239,244,255,0.92)] text-muted-foreground",
+                    )}
+                  >
+                    {approved ? (
+                      <BadgeCheckIcon className="size-4" />
+                    ) : sourceLatest ? (
+                      <FileClockIcon className="size-4" />
+                    ) : (
+                      <XCircleIcon className="size-4" />
+                    )}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold tracking-[-0.01em] text-foreground">
+                      {source.label || `Fuente ${source.orderIndex + 1}`}
+                    </p>
+                    <p
+                      className={cn(
+                        "mt-1 text-xs font-semibold",
+                        approved
+                          ? "text-primary"
+                          : sourceLatest
+                            ? "text-[#6f5400]"
+                            : "text-muted-foreground",
+                      )}
+                    >
+                      {statusLabel}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-2">
+                  <MetaRow
+                    label="Estado"
+                    value={sourceLatest ? summarizeArtifactStatus(sourceLatest.status) : "Vacío"}
+                  />
+                  <MetaRow
+                    label="Versión"
+                    value={sourceLatest ? formatDateTime(sourceLatest.createdAt) : "Pendiente"}
+                  />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="min-w-0 space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-4 rounded-[28px] border border-[rgba(199,196,216,0.14)] bg-white/78 p-5 shadow-[0_12px_28px_rgba(13,28,46,0.04)]">
+          <div>
+            <p className="editorial-kicker">Fuente activa</p>
+            <p className="mt-2 text-lg font-semibold tracking-[-0.02em] text-foreground">
+              {activeSource.label || `Fuente ${activeSource.orderIndex + 1}`}
+            </p>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+              Texto base listo para revisar claim a claim.
+            </p>
+          </div>
+          {activeArtifacts.length > 0 ? (
+            <HistoryDialog
+              episodeId={episodeId}
+              stage="extraction"
+              artifacts={activeArtifacts}
+              activeArtifactId={activeArtifact?.id ?? null}
+              pendingActionId={pendingActionId}
+              onSelectArtifact={(artifactId) =>
+                versionState.onSelectArtifact(scopeKey, artifactId)
+              }
+              onRunAction={onRunAction}
+            />
+          ) : null}
+        </div>
+
+        {latest ? (
+          <VersionedArtifactPanel
+            episodeId={episodeId}
+            stage="extraction"
+            artifacts={activeArtifacts}
+            pendingActionId={pendingActionId}
+            versionState={versionState}
+            onRunAction={onRunAction}
+          />
+        ) : (
+          <Alert>
+            <FileClockIcon />
+            <AlertTitle>Aún no hay extracción</AlertTitle>
+            <AlertDescription>
+              Genera la fase para crear una primera versión.
+            </AlertDescription>
+          </Alert>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function StageTabButton({
   phase,
   index,
@@ -627,7 +1738,7 @@ function StageTabButton({
       type="button"
       onClick={onSelect}
       className={cn(
-        "group flex min-w-[14rem] items-center gap-3 rounded-[22px] border px-4 py-3 text-left transition-all",
+        "group flex min-w-[14rem] flex-1 items-center gap-3 rounded-[22px] border px-4 py-3 text-left transition-all",
         active
           ? "border-transparent bg-white shadow-[0_14px_24px_rgba(13,28,46,0.06)]"
           : "border-[rgba(199,196,216,0.16)] bg-[rgba(255,255,255,0.5)] hover:bg-[rgba(255,255,255,0.78)]",
@@ -667,9 +1778,25 @@ function StageTabButton({
 export function EpisodeWorkspace({ episode, sources, artifacts }: WorkspaceProps) {
   const router = useRouter();
   const [activeStage, setActiveStage] = useState<PhaseKey>("sources");
-  const [activeSourceTab, setActiveSourceTab] = useState<string>(sources[0]?.id ?? "");
-  const [message, setMessage] = useState<ActionResult | null>(null);
+  const [activeSourceId, setActiveSourceId] = useState<string>(sources[0]?.id ?? "");
+  const [message, setMessage] = useState<ActionFeedback | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [selectedArtifactIds, setSelectedArtifactIds] = useState<Record<string, string>>({});
+  const [compareArtifactIds, setCompareArtifactIds] = useState<Record<string, string>>({});
+  const [artifactViewModes, setArtifactViewModes] = useState<Record<string, ArtifactViewMode>>({});
   const [isPending, startTransition] = useTransition();
+
+  const versionState: ArtifactVersionState = {
+    selectedArtifactIds,
+    compareArtifactIds,
+    artifactViewModes,
+    onSelectArtifact: (scopeKey, artifactId) =>
+      setSelectedArtifactIds((current) => ({ ...current, [scopeKey]: artifactId })),
+    onSelectCompareArtifact: (scopeKey, artifactId) =>
+      setCompareArtifactIds((current) => ({ ...current, [scopeKey]: artifactId })),
+    onSelectViewMode: (scopeKey, mode) =>
+      setArtifactViewModes((current) => ({ ...current, [scopeKey]: mode })),
+  };
 
   const extractionBySource = useMemo(
     () =>
@@ -709,6 +1836,14 @@ export function EpisodeWorkspace({ episode, sources, artifacts }: WorkspaceProps
       };
     }
 
+    if (phase.key === "extraction") {
+      return {
+        phase,
+        current: getLatestArtifact(getArtifactsForStage(artifacts, "extraction")),
+        approved: approvedExtractions,
+      };
+    }
+
     return {
       phase,
       current: getLatestArtifact(getArtifactsForStage(artifacts, phase.key)),
@@ -717,21 +1852,54 @@ export function EpisodeWorkspace({ episode, sources, artifacts }: WorkspaceProps
       ),
     };
   });
-  const activePhase = PHASES.find((phase) => phase.key === activeStage);
+  const activePhaseState = phaseStates.find(({ phase }) => phase.key === activeStage);
+  const activePhase = activePhaseState?.phase;
+  const selectedSource =
+    sources.find((source) => source.id === activeSourceId) ?? sources[0] ?? null;
 
-  let activePhaseArtifact: ArtifactRow | null = activePhase?.current ?? null;
-  if (activeStage === "extraction" && activeSourceTab) {
-    activePhaseArtifact = getLatestArtifact(extractionBySource.get(activeSourceTab) ?? []);
+  let activePhaseArtifact: ArtifactRow | null = activePhaseState?.current ?? null;
+  if (activeStage === "extraction" && selectedSource) {
+    const sourceArtifacts = extractionBySource.get(selectedSource.id) ?? [];
+    activePhaseArtifact = getSelectedArtifact(
+      sourceArtifacts,
+      selectedArtifactIds[getVersionScopeKey("extraction", selectedSource.id)],
+    );
+  } else if (activeStage !== "sources") {
+    const stageArtifacts = getArtifactsForStage(artifacts, activeStage);
+    activePhaseArtifact = getSelectedArtifact(
+      stageArtifacts,
+      selectedArtifactIds[getVersionScopeKey(activeStage)],
+    );
   }
 
-  const runAction = (runner: () => Promise<ActionResult>) => {
+  const runAction: RunAction = (options, runner) => {
     setMessage(null);
+    setPendingAction({
+      id: options.id,
+      label: options.pendingLabel,
+      kind: options.kind ?? "default",
+    });
     startTransition(async () => {
-      const result = await runner();
-      setMessage(result);
-      router.refresh();
+      try {
+        const result = await runner();
+        setMessage({
+          ...result,
+          title: result.ok ? options.successTitle : options.failureTitle,
+        });
+        router.refresh();
+      } catch (error) {
+        setMessage({
+          ok: false,
+          title: options.failureTitle,
+          message: error instanceof Error ? error.message : "La acción no se pudo completar.",
+        });
+      } finally {
+        setPendingAction(null);
+      }
     });
   };
+  const pendingActionId = pendingAction?.id ?? null;
+  const longRunningAction = isPending && pendingAction?.kind === "generation" ? pendingAction : null;
 
   const renderActiveStage = () => {
     if (activeStage === "sources") {
@@ -749,15 +1917,27 @@ export function EpisodeWorkspace({ episode, sources, artifacts }: WorkspaceProps
               <Button
                 variant="outline"
                 onClick={() =>
-                  runAction(async () => {
-                    const formData = new FormData();
-                    formData.set("episodeId", episode.id);
-                    return addSourceAction(formData);
-                  })
+                  runAction(
+                    {
+                      id: "add-source",
+                      pendingLabel: "Añadiendo fuente",
+                      successTitle: "Fuente añadida",
+                      failureTitle: "No se pudo añadir la fuente",
+                    },
+                    async () => {
+                      const formData = new FormData();
+                      formData.set("episodeId", episode.id);
+                      return addSourceAction(formData);
+                    },
+                  )
                 }
-                disabled={sources.length >= 5}
+                disabled={sources.length >= 5 || pendingActionId === "add-source"}
               >
-                <PlusIcon data-icon="inline-start" />
+                {pendingActionId === "add-source" ? (
+                  <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+                ) : (
+                  <PlusIcon data-icon="inline-start" />
+                )}
                 Añadir fuente
               </Button>
             </div>
@@ -769,6 +1949,7 @@ export function EpisodeWorkspace({ episode, sources, artifacts }: WorkspaceProps
                 episodeId={episode.id}
                 source={source}
                 canDelete={sources.length > 1}
+                pendingActionId={pendingActionId}
                 onRunAction={runAction}
               />
             ))}
@@ -793,91 +1974,56 @@ export function EpisodeWorkspace({ episode, sources, artifacts }: WorkspaceProps
                 episodeId={episode.id}
                 stage="extraction"
                 value={episode.modelConfig.extractionModel}
+                pendingActionId={pendingActionId}
                 onRunAction={runAction}
               />
               <div className="rounded-[24px] bg-[rgba(239,244,255,0.92)] p-5">
                 <p className="editorial-kicker">Action</p>
+                {pendingActionId === "generate-extraction" ? (
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    Generando una extracción por fuente.
+                  </p>
+                ) : null}
                 <Button
                   className="mt-3"
                   onClick={() =>
-                    runAction(async () => {
-                      const formData = new FormData();
-                      formData.set("episodeId", episode.id);
-                      return generateExtractionAction(formData);
-                    })
+                    runAction(
+                      {
+                        id: "generate-extraction",
+                        pendingLabel: "Generando extracciones",
+                        successTitle: "Extracciones generadas",
+                        failureTitle: "No se pudieron generar las extracciones",
+                        kind: "generation",
+                      },
+                      async () => {
+                        const formData = new FormData();
+                        formData.set("episodeId", episode.id);
+                        return generateExtractionAction(formData);
+                      },
+                    )
                   }
+                  disabled={pendingActionId === "generate-extraction"}
                 >
-                  <SparklesIcon data-icon="inline-start" />
+                  {pendingActionId === "generate-extraction" ? (
+                    <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+                  ) : (
+                    <SparklesIcon data-icon="inline-start" />
+                  )}
                   Generar extracciones
                 </Button>
               </div>
             </div>
 
-            <Tabs defaultValue={sources[0]?.id} value={activeSourceTab} onValueChange={setActiveSourceTab} className="gap-5">
-              <TabsList variant="line" className="w-full justify-start overflow-x-auto rounded-[22px] bg-[rgba(239,244,255,0.9)] p-2">
-                {sources.map((source) => {
-                  const stageArtifacts = extractionBySource.get(source.id) ?? [];
-                  return (
-                    <TabsTrigger
-                      key={source.id}
-                      value={source.id}
-                      className="rounded-2xl px-4 py-2 data-active:bg-white data-active:shadow-[0_10px_18px_rgba(13,28,46,0.05)]"
-                    >
-                      {source.label || `Fuente ${source.orderIndex + 1}`}
-                      {getLatestApprovedArtifact(stageArtifacts) ? (
-                        <Badge className="ml-2">OK</Badge>
-                      ) : null}
-                    </TabsTrigger>
-                  );
-                })}
-              </TabsList>
-
-              {sources.map((source) => {
-                const stageArtifacts = extractionBySource.get(source.id) ?? [];
-                const latest = getLatestArtifact(stageArtifacts);
-
-                return (
-                  <TabsContent key={source.id} value={source.id}>
-                    <div className="space-y-4">
-                      <div className="flex flex-wrap items-end justify-between gap-4">
-                        <div>
-                          <p className="text-lg font-semibold tracking-[-0.02em] text-foreground">
-                            {source.label || `Fuente ${source.orderIndex + 1}`}
-                          </p>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            Texto base listo para revisar claim a claim.
-                          </p>
-                        </div>
-                        {stageArtifacts.length > 0 ? (
-                          <HistoryDialog
-                            episodeId={episode.id}
-                            stage="extraction"
-                            artifacts={stageArtifacts}
-                            onRunAction={runAction}
-                          />
-                        ) : null}
-                      </div>
-
-                      {latest ? (
-                        <JsonArtifactEditor
-                          episodeId={episode.id}
-                          artifact={latest}
-                          onRunAction={runAction}
-                        />
-                      ) : (
-                        <Alert>
-                          <FileClockIcon />
-                          <AlertTitle>Aún no hay extracción</AlertTitle>
-                          <AlertDescription>
-                            Genera la fase para crear una primera versión.
-                          </AlertDescription>
-                        </Alert>
-                      )}
-                    </div>
-                  </TabsContent>
-                );
-              })}
-            </Tabs>
+            <SourceReviewSelector
+              episodeId={episode.id}
+              sources={sources}
+              extractionBySource={extractionBySource}
+              activeSourceId={selectedSource?.id ?? ""}
+              onSelectSource={setActiveSourceId}
+              pendingActionId={pendingActionId}
+              versionState={versionState}
+              onRunAction={runAction}
+            />
           </CardContent>
         </Card>
       );
@@ -895,12 +2041,23 @@ export function EpisodeWorkspace({ episode, sources, artifacts }: WorkspaceProps
           latestArtifact={latestConsolidation}
           history={getArtifactsForStage(artifacts, "consolidation")}
           onGenerate={() =>
-            runAction(async () => {
-              const formData = new FormData();
-              formData.set("episodeId", episode.id);
-              return generateConsolidationAction(formData);
-            })
+            runAction(
+              {
+                id: "generate-consolidation",
+                pendingLabel: "Generando consolidación",
+                successTitle: "Consolidación generada",
+                failureTitle: "No se pudo generar la consolidación",
+                kind: "generation",
+              },
+              async () => {
+                const formData = new FormData();
+                formData.set("episodeId", episode.id);
+                return generateConsolidationAction(formData);
+              },
+            )
           }
+          pendingActionId={pendingActionId}
+          versionState={versionState}
           onRunAction={runAction}
         />
       );
@@ -918,12 +2075,23 @@ export function EpisodeWorkspace({ episode, sources, artifacts }: WorkspaceProps
           latestArtifact={latestOutline}
           history={getArtifactsForStage(artifacts, "outline")}
           onGenerate={() =>
-            runAction(async () => {
-              const formData = new FormData();
-              formData.set("episodeId", episode.id);
-              return generateOutlineAction(formData);
-            })
+            runAction(
+              {
+                id: "generate-outline",
+                pendingLabel: "Generando outline",
+                successTitle: "Outline generado",
+                failureTitle: "No se pudo generar el outline",
+                kind: "generation",
+              },
+              async () => {
+                const formData = new FormData();
+                formData.set("episodeId", episode.id);
+                return generateOutlineAction(formData);
+              },
+            )
           }
+          pendingActionId={pendingActionId}
+          versionState={versionState}
           onRunAction={runAction}
         />
       );
@@ -941,12 +2109,23 @@ export function EpisodeWorkspace({ episode, sources, artifacts }: WorkspaceProps
           latestArtifact={latestScript}
           history={getArtifactsForStage(artifacts, "script")}
           onGenerate={() =>
-            runAction(async () => {
-              const formData = new FormData();
-              formData.set("episodeId", episode.id);
-              return generateScriptAction(formData);
-            })
+            runAction(
+              {
+                id: "generate-script",
+                pendingLabel: "Generando guion",
+                successTitle: "Guion generado",
+                failureTitle: "No se pudo generar el guion",
+                kind: "generation",
+              },
+              async () => {
+                const formData = new FormData();
+                formData.set("episodeId", episode.id);
+                return generateScriptAction(formData);
+              },
+            )
           }
+          pendingActionId={pendingActionId}
+          versionState={versionState}
           onRunAction={runAction}
         />
       );
@@ -963,19 +2142,30 @@ export function EpisodeWorkspace({ episode, sources, artifacts }: WorkspaceProps
         latestArtifact={latestAudit}
         history={getArtifactsForStage(artifacts, "audit")}
         onGenerate={() =>
-          runAction(async () => {
-            const formData = new FormData();
-            formData.set("episodeId", episode.id);
-            return generateAuditAction(formData);
-          })
+          runAction(
+            {
+              id: "generate-audit",
+              pendingLabel: "Generando auditoría",
+              successTitle: "Auditoría generada",
+              failureTitle: "No se pudo generar la auditoría",
+              kind: "generation",
+            },
+            async () => {
+              const formData = new FormData();
+              formData.set("episodeId", episode.id);
+              return generateAuditAction(formData);
+            },
+          )
         }
+        pendingActionId={pendingActionId}
+        versionState={versionState}
         onRunAction={runAction}
       />
     );
   };
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex w-full min-w-0 flex-col gap-6">
       <Card className="overflow-hidden bg-[rgba(255,255,255,0.78)]">
         <CardHeader className="gap-4 border-b border-[rgba(199,196,216,0.12)] pb-7">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -1003,34 +2193,59 @@ export function EpisodeWorkspace({ episode, sources, artifacts }: WorkspaceProps
           </div>
         </CardHeader>
 
-        <CardContent className="grid gap-4 py-6 xl:grid-cols-[1.15fr_0.85fr]">
-          <div className="rounded-[28px] bg-[rgba(239,244,255,0.92)] p-5">
-            <p className="editorial-kicker">Editorial brief</p>
-            <div className="mt-4 grid gap-4 lg:grid-cols-2">
-              <div>
-                <p className="text-sm font-semibold text-foreground">Ángulo</p>
-                <p className="mt-2 text-sm leading-7 text-muted-foreground">
-                  {episode.angleHint
-                    ? episode.angleHint
-                    : "Sin ángulo fijado todavía."}
-                </p>
+        <CardContent className="space-y-4 py-6">
+          <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+            <div className="rounded-[28px] bg-[rgba(239,244,255,0.92)] p-5">
+              <p className="editorial-kicker">Editorial brief</p>
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Ángulo</p>
+                  <p className="mt-2 text-sm leading-7 text-muted-foreground">
+                    {episode.angleHint
+                      ? episode.angleHint
+                      : "Sin ángulo fijado todavía."}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Notas</p>
+                  <p className="mt-2 text-sm leading-7 text-muted-foreground">
+                    {episode.editorialNotes
+                      ? episode.editorialNotes
+                      : "Sin notas editoriales adicionales."}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="text-sm font-semibold text-foreground">Notas</p>
-                <p className="mt-2 text-sm leading-7 text-muted-foreground">
-                  {episode.editorialNotes
-                    ? episode.editorialNotes
-                    : "Sin notas editoriales adicionales."}
-                </p>
-              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-1">
+              <MetricCard label="Extracciones aprobadas" value={approvedExtractions ? "Completas" : "Pendientes"} />
+              <MetricCard label="Outline aprobado" value={approvedOutline ? "Sí" : "Pendiente"} />
+              <MetricCard label="Script aprobado" value={approvedScript ? "Sí" : "Pendiente"} />
             </div>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-1">
-            <MetricCard label="Extracciones OK" value={approvedExtractions ? "Sí" : "No"} />
-            <MetricCard label="Outline OK" value={approvedOutline ? "Sí" : "No"} />
-            <MetricCard label="Script OK" value={approvedScript ? "Sí" : "No"} />
-          </div>
+          {activePhaseArtifact ? (
+            <div className="rounded-[28px] bg-[rgba(255,255,255,0.68)] p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="editorial-kicker">Version Meta</p>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    Instantánea contextual de la versión activa.
+                  </p>
+                </div>
+                <StageStatusBadge
+                  approved={activePhaseArtifact.status === "approved"}
+                  current={activePhaseArtifact}
+                />
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <MetaRow label="Estado" value={summarizeArtifactStatus(activePhaseArtifact.status)} />
+                <MetaRow label="Modelo" value={activePhaseArtifact.modelName ?? "Manual"} />
+                <MetaRow label="Creado" value={formatDateTime(activePhaseArtifact.createdAt)} />
+                <MetaRow label="Prompt version" value={activePhaseArtifact.promptVersion ?? "Sin versión"} />
+              </div>
+            </div>
+          ) : null}
         </CardContent>
 
         <div className="border-t border-[rgba(199,196,216,0.12)] px-5 pb-5 pt-1 md:px-6">
@@ -1052,99 +2267,22 @@ export function EpisodeWorkspace({ episode, sources, artifacts }: WorkspaceProps
 
       {message ? (
         <Alert variant={message.ok ? "default" : "destructive"}>
-          <AlertTitle>{message.ok ? "Actualizado" : "Atención"}</AlertTitle>
+          <AlertTitle>{message.title}</AlertTitle>
           <AlertDescription>{message.message}</AlertDescription>
         </Alert>
       ) : null}
 
-      {isPending ? (
-        <Alert>
+      {longRunningAction ? (
+        <Alert className="py-3">
           <LoaderCircleIcon className="animate-spin" />
-          <AlertTitle>Trabajando</AlertTitle>
+          <AlertTitle>{longRunningAction.label}</AlertTitle>
           <AlertDescription>
-            La acción se está ejecutando. Al terminar refresco el workspace.
+            Esta tarea puede tardar un poco. El workspace se refrescará al terminar.
           </AlertDescription>
         </Alert>
       ) : null}
 
-      <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-        <aside className="space-y-4 xl:sticky xl:top-24 xl:self-start">
-          <Card size="sm" className="bg-[rgba(255,255,255,0.78)]">
-            <CardHeader>
-              <p className="editorial-kicker">Pipeline Readiness</p>
-              <CardTitle>Narrative status</CardTitle>
-              <CardDescription>
-                Estado resumido de cada fase antes de seguir avanzando.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {phaseStates.map(({ phase, current, approved }, index) => (
-                <button
-                  key={phase.key}
-                  type="button"
-                  onClick={() => setActiveStage(phase.key)}
-                  className={cn(
-                    "flex w-full items-center justify-between gap-3 rounded-[18px] px-3 py-3 text-left transition-all",
-                    activeStage === phase.key
-                      ? "bg-[rgba(239,244,255,0.96)]"
-                      : "hover:bg-[rgba(239,244,255,0.62)]",
-                  )}
-                >
-                  <div className="min-w-0">
-                    <p className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                      {String(index + 1).padStart(2, "0")}
-                    </p>
-                    <p className="mt-1 truncate text-sm font-semibold text-foreground">
-                      {STAGE_LABELS[phase.key]}
-                    </p>
-                  </div>
-                  <StageStatusBadge approved={approved} current={current} />
-                </button>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card size="sm" className="bg-[rgba(255,255,255,0.78)]">
-            <CardHeader>
-              <p className="editorial-kicker">Brief</p>
-              <CardTitle>Editorial inputs</CardTitle>
-              <CardDescription>
-                Contexto que acompaña todas las fases del episodio.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <MetaRow
-                label="Ángulo"
-                value={episode.angleHint || "Sin ángulo fijado todavía."}
-              />
-              <MetaRow
-                label="Notas"
-                value={episode.editorialNotes || "Sin notas editoriales adicionales."}
-              />
-              <MetaRow label="Prompt version" value={getPromptVersion()} />
-            </CardContent>
-          </Card>
-
-          {activePhaseArtifact ? (
-            <Card size="sm" className="bg-[rgba(255,255,255,0.78)]">
-              <CardHeader>
-                <p className="editorial-kicker">Version Meta</p>
-                <CardTitle>Instantánea actual</CardTitle>
-                <CardDescription>
-                  Estado, fecha y modelo de la versión activa.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <MetaRow label="Estado" value={summarizeArtifactStatus(activePhaseArtifact.status)} />
-                <MetaRow label="Modelo" value={activePhaseArtifact.modelName ?? "Manual"} />
-                <MetaRow label="Creado" value={formatDateTime(activePhaseArtifact.createdAt)} />
-              </CardContent>
-            </Card>
-          ) : null}
-        </aside>
-
-        <div className="min-w-0">{renderActiveStage()}</div>
-      </div>
+      <div className="min-w-0">{renderActiveStage()}</div>
     </div>
   );
 }
@@ -1159,6 +2297,8 @@ function StageArtifactSection({
   latestArtifact,
   history,
   onGenerate,
+  pendingActionId,
+  versionState,
   onRunAction,
 }: {
   title: string;
@@ -1170,9 +2310,18 @@ function StageArtifactSection({
   latestArtifact: ArtifactRow | null;
   history: ArtifactRow[];
   onGenerate: () => void;
-  onRunAction: (runner: () => Promise<ActionResult>) => void;
+  pendingActionId: string | null;
+  versionState: ArtifactVersionState;
+  onRunAction: RunAction;
 }) {
   const modelValue = episode.modelConfig[`${stage}Model` as keyof typeof episode.modelConfig];
+  const generateActionId = `generate-${stage}`;
+  const generating = pendingActionId === generateActionId;
+  const scopeKey = getVersionScopeKey(stage);
+  const activeArtifact = getSelectedArtifact(
+    history,
+    versionState.selectedArtifactIds[scopeKey],
+  );
 
   return (
     <Card className="bg-[rgba(248,249,255,0.78)]">
@@ -1197,6 +2346,11 @@ function StageArtifactSection({
                 episodeId={episode.id}
                 stage={stage}
                 artifacts={history}
+                activeArtifactId={activeArtifact?.id ?? null}
+                pendingActionId={pendingActionId}
+                onSelectArtifact={(artifactId) =>
+                  versionState.onSelectArtifact(scopeKey, artifactId)
+                }
                 onRunAction={onRunAction}
               />
             ) : null}
@@ -1209,12 +2363,22 @@ function StageArtifactSection({
             episodeId={episode.id}
             stage={stage}
             value={modelValue}
+            pendingActionId={pendingActionId}
             onRunAction={onRunAction}
           />
           <div className="rounded-[24px] bg-[rgba(239,244,255,0.92)] p-5">
             <p className="editorial-kicker">Action</p>
-            <Button className="mt-3" onClick={onGenerate} disabled={!canGenerate}>
-              <SparklesIcon data-icon="inline-start" />
+            {generating ? (
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Generación en curso para esta fase.
+              </p>
+            ) : null}
+            <Button className="mt-3" onClick={onGenerate} disabled={!canGenerate || generating}>
+              {generating ? (
+                <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <SparklesIcon data-icon="inline-start" />
+              )}
               Generar {STAGE_LABELS[stage].toLowerCase()}
             </Button>
             {!canGenerate ? (
@@ -1226,19 +2390,14 @@ function StageArtifactSection({
         <Separator />
 
         {latestArtifact ? (
-          stage === "script" ? (
-            <ScriptArtifactEditor
-              episodeId={episode.id}
-              artifact={latestArtifact}
-              onRunAction={onRunAction}
-            />
-          ) : (
-            <JsonArtifactEditor
-              episodeId={episode.id}
-              artifact={latestArtifact}
-              onRunAction={onRunAction}
-            />
-          )
+          <VersionedArtifactPanel
+            episodeId={episode.id}
+            stage={stage}
+            artifacts={history}
+            pendingActionId={pendingActionId}
+            versionState={versionState}
+            onRunAction={onRunAction}
+          />
         ) : (
           <Alert>
             <FileClockIcon />

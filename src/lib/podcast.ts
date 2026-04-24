@@ -30,6 +30,8 @@ export const STAGE_LABELS: Record<StageKey, string> = {
 };
 
 export const DEFAULT_ALLOWED_MODELS = [
+  "gemini-3.1-pro-preview",
+  "gemini-3.1-flash-lite-preview",
   "gemini-3-pro-preview",
   "gemini-3-flash-preview",
   "gemini-2.5-pro",
@@ -52,12 +54,12 @@ function parseAllowedModels() {
 export const ALLOWED_MODELS = parseAllowedModels();
 
 export const DEFAULT_MODEL_BY_STAGE = {
-  extraction: process.env.GEMINI_DEFAULT_EXTRACTION_MODEL ?? "gemini-3-pro-preview",
+  extraction: process.env.GEMINI_DEFAULT_EXTRACTION_MODEL ?? "gemini-3.1-pro-preview",
   consolidation:
-    process.env.GEMINI_DEFAULT_CONSOLIDATION_MODEL ?? "gemini-3-pro-preview",
-  outline: process.env.GEMINI_DEFAULT_OUTLINE_MODEL ?? "gemini-3-pro-preview",
-  script: process.env.GEMINI_DEFAULT_SCRIPT_MODEL ?? "gemini-3-pro-preview",
-  audit: process.env.GEMINI_DEFAULT_AUDIT_MODEL ?? "gemini-3-pro-preview",
+    process.env.GEMINI_DEFAULT_CONSOLIDATION_MODEL ?? "gemini-3.1-pro-preview",
+  outline: process.env.GEMINI_DEFAULT_OUTLINE_MODEL ?? "gemini-3.1-pro-preview",
+  script: process.env.GEMINI_DEFAULT_SCRIPT_MODEL ?? "gemini-3.1-pro-preview",
+  audit: process.env.GEMINI_DEFAULT_AUDIT_MODEL ?? "gemini-3.1-pro-preview",
 } satisfies Record<ArtifactStageKey, string>;
 
 export const EPISODE_TYPES = ["summary", "deep_dive"] as const;
@@ -113,6 +115,9 @@ export const episodeBriefSchema = z.object({
   editorialNotes: z.string().nullable(),
 });
 
+const modelIntegerSchema = z.coerce.number().int();
+const modelNumberSchema = z.coerce.number();
+
 export const sourceExtractionSchema = z.object({
   sourceId: z.string().min(1),
   sourceSummary: z.string().min(1),
@@ -120,13 +125,7 @@ export const sourceExtractionSchema = z.object({
     z.object({
       claimId: z.string().min(1),
       text: z.string().min(1),
-      importance: z.union([
-        z.literal(1),
-        z.literal(2),
-        z.literal(3),
-        z.literal(4),
-        z.literal(5),
-      ]),
+      importance: modelIntegerSchema.min(1).max(5),
       kind: z.enum(["fact", "interpretation", "prediction", "opinion"]),
       evidenceQuote: z.string().min(1),
     }),
@@ -180,7 +179,7 @@ export const episodeOutlineSchema = z.object({
       blockId: z.string().min(1),
       title: z.string().min(1),
       purpose: z.string().min(1),
-      targetMinutes: z.number().min(0),
+      targetMinutes: modelNumberSchema.min(0),
       mustIncludeClaimRefs: z.array(z.string().min(1)),
       notes: z.array(z.string()),
     }),
@@ -197,7 +196,7 @@ export const scriptDraftSchema = z.object({
 
 export const scriptAuditSchema = z.object({
   pass: z.boolean(),
-  score: z.number().min(0).max(100),
+  score: modelNumberSchema.min(0).max(100),
   missingMustKeep: z.array(z.string()),
   weaklySupportedClaims: z.array(z.string()),
   underusedSources: z.array(z.string()),

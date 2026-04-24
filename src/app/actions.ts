@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import {
+  adjustArtifact,
   generateAudit,
   generateConsolidation,
   generateOutline,
@@ -37,6 +38,7 @@ import {
   revertArtifact,
   setEpisodeStatus,
   touchEpisode,
+  unapproveArtifact,
   updateArtifactContent,
   updateEpisodeModels,
   updateSource,
@@ -67,6 +69,10 @@ function parseString(value: FormDataEntryValue | null) {
 function parseNullable(value: FormDataEntryValue | null) {
   const parsed = parseString(value);
   return parsed ? parsed : null;
+}
+
+function uniqueArtifactIds(ids: string[]) {
+  return [...new Set(ids)];
 }
 
 async function getRequiredEpisode(episodeId: string) {
@@ -313,6 +319,35 @@ export async function approveArtifactAction(formData: FormData) {
   }
 }
 
+export async function unapproveArtifactAction(formData: FormData) {
+  const artifactId = parseString(formData.get("artifactId"));
+  const episodeId = parseString(formData.get("episodeId"));
+
+  try {
+    const [artifact, episode] = await Promise.all([
+      getArtifactById(artifactId),
+      getRequiredEpisode(episodeId),
+    ]);
+
+    if (!artifact) {
+      return failure("No se ha encontrado la versión.");
+    }
+
+    await unapproveArtifact(artifactId);
+
+    if (artifact.stage === "audit" && episode.status === "ready") {
+      await setEpisodeStatus(episodeId, "in_progress");
+    }
+
+    ensurePath(episodeId);
+    return success("Versión desaprobada.");
+  } catch (error) {
+    return failure(
+      error instanceof Error ? error.message : "No se pudo desaprobar la versión.",
+    );
+  }
+}
+
 export async function revertArtifactAction(formData: FormData) {
   const artifactId = parseString(formData.get("artifactId"));
   const episodeId = parseString(formData.get("episodeId"));
@@ -390,6 +425,7 @@ async function getApprovedExtractionInputs(episodeId: string) {
   }
 
   const extractions = [];
+  const extractionArtifactIds = [];
 
   for (const source of workspace.sources) {
     const artifact = await getApprovedArtifact(episodeId, "extraction", source.id);
@@ -401,9 +437,10 @@ async function getApprovedExtractionInputs(episodeId: string) {
     }
 
     extractions.push(getExtractionInput(parseArtifactContent("extraction", artifact.currentContent)));
+    extractionArtifactIds.push(artifact.id);
   }
 
-  return { workspace, extractions };
+  return { workspace, extractions, extractionArtifactIds };
 }
 
 async function createStageArtifact<TStage extends Exclude<ArtifactStageKey, "extraction">>(params: {
@@ -422,6 +459,176 @@ async function createStageArtifact<TStage extends Exclude<ArtifactStageKey, "ext
     basedOnArtifactIds: params.basedOnArtifactIds,
     content: serializeArtifactContent(params.stage, params.payload),
   });
+}
+
+export async function adjustArtifactAction(formData: FormData) {
+  const episodeId = parseString(formData.get("episodeId"));
+  const artifactId = parseString(formData.get("artifactId"));
+  const instruction = parseString(formData.get("instruction"));
+
+  if (!instruction) {
+    return failure("Describe el ajuste que quieres pedirle a la IA.");
+  }
+
+  try {
+    const [workspace, artifact] = await Promise.all([
+      getEpisodeWorkspace(episodeId),
+      getArtifactById(artifactId),
+    ]);
+
+    if (!workspace || !artifact || artifact.episodeId !== episodeId) {
+      return failure("No se ha encontrado la versión a ajustar.");
+    }
+
+    const stage = artifact.stage;
+    const brief = createEpisodeBrief(workspace.episode);
+    const model = workspace.episode.modelConfig[getModelConfigKey(stage)];
+    const basedOnArtifactIds = [artifact.id];
+    const currentArtifact = parseArtifactContent(stage, artifact.currentContent);
+    let context: unknown;
+    let sourceId: string | null = artifact.sourceId;
+
+    if (stage === "extraction") {
+      if (!artifact.sourceId) {
+        return failure("La extracción no está asociada a una fuente.");
+      }
+
+      const source = workspace.sources.find((item) => item.id === artifact.sourceId);
+
+      if (!source) {
+        return failure("No se ha encontrado la fuente de esta extracción.");
+      }
+
+      context = {
+        source: {
+          id: source.id,
+          label: source.label,
+          rawText: source.rawText,
+        },
+      };
+    } else if (stage === "consolidation") {
+      const { extractions, extractionArtifactIds } =
+        await getApprovedExtractionInputs(episodeId);
+      context = { approvedExtractions: extractions };
+      basedOnArtifactIds.push(...extractionArtifactIds);
+    } else if (stage === "outline") {
+      const approvedConsolidation = await getApprovedArtifact(
+        episodeId,
+        "consolidation",
+      );
+
+      if (!approvedConsolidation) {
+        return failure("Debes aprobar una consolidación antes de ajustar el outline.");
+      }
+
+      context = {
+        approvedConsolidation: parseArtifactContent(
+          "consolidation",
+          approvedConsolidation.currentContent,
+        ),
+      };
+      basedOnArtifactIds.push(approvedConsolidation.id);
+    } else if (stage === "script") {
+      const { extractions, extractionArtifactIds } =
+        await getApprovedExtractionInputs(episodeId);
+      const approvedConsolidation = await getApprovedArtifact(
+        episodeId,
+        "consolidation",
+      );
+      const approvedOutline = await getApprovedArtifact(episodeId, "outline");
+
+      if (!approvedConsolidation || !approvedOutline) {
+        return failure(
+          "Debes aprobar consolidación y outline antes de ajustar el guión.",
+        );
+      }
+
+      context = {
+        approvedExtractions: extractions,
+        approvedConsolidation: parseArtifactContent(
+          "consolidation",
+          approvedConsolidation.currentContent,
+        ),
+        approvedOutline: parseArtifactContent(
+          "outline",
+          approvedOutline.currentContent,
+        ),
+      };
+      basedOnArtifactIds.push(
+        ...extractionArtifactIds,
+        approvedConsolidation.id,
+        approvedOutline.id,
+      );
+    } else {
+      const { extractions, extractionArtifactIds } =
+        await getApprovedExtractionInputs(episodeId);
+      const approvedConsolidation = await getApprovedArtifact(
+        episodeId,
+        "consolidation",
+      );
+      const approvedOutline = await getApprovedArtifact(episodeId, "outline");
+      const approvedScript = await getApprovedArtifact(episodeId, "script");
+
+      if (!approvedConsolidation || !approvedOutline || !approvedScript) {
+        return failure(
+          "Debes aprobar consolidación, outline y guión antes de ajustar la auditoría.",
+        );
+      }
+
+      context = {
+        approvedExtractions: extractions,
+        approvedConsolidation: parseArtifactContent(
+          "consolidation",
+          approvedConsolidation.currentContent,
+        ),
+        approvedOutline: parseArtifactContent(
+          "outline",
+          approvedOutline.currentContent,
+        ),
+        approvedScript: parseArtifactContent(
+          "script",
+          approvedScript.currentContent,
+        ),
+      };
+      basedOnArtifactIds.push(
+        ...extractionArtifactIds,
+        approvedConsolidation.id,
+        approvedOutline.id,
+        approvedScript.id,
+      );
+      sourceId = null;
+    }
+
+    const adjustedArtifact = await adjustArtifact({
+      model,
+      stage,
+      brief,
+      currentArtifact,
+      instruction,
+      context,
+      sourceId,
+    });
+
+    await createArtifact({
+      episodeId,
+      sourceId,
+      stage,
+      status: "generated",
+      modelName: model,
+      promptVersion: getPromptVersion(),
+      basedOnArtifactIds: uniqueArtifactIds(basedOnArtifactIds),
+      content: serializeArtifactContent(stage, adjustedArtifact),
+    });
+
+    ensurePath(episodeId);
+    return success("Ajuste generado como nueva versión.");
+  } catch (error) {
+    await setEpisodeStatus(episodeId, "blocked");
+    ensurePath(episodeId);
+    return failure(
+      error instanceof Error ? error.message : "No se pudo ajustar la versión.",
+    );
+  }
 }
 
 export async function generateConsolidationAction(formData: FormData) {
