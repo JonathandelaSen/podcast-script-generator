@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { diffLines, diffWordsWithSpace, type Change } from "diff";
+import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import {
   BadgeCheckIcon,
@@ -91,6 +92,7 @@ type WorkspaceProps = {
   episode: EpisodeRow;
   sources: SourceRow[];
   artifacts: ArtifactRow[];
+  initialStage?: PhaseKey;
 };
 
 type ActionResult = {
@@ -1717,6 +1719,7 @@ function SourceReviewSelector({
 }
 
 function StageTabButton({
+  episodeId,
   phase,
   index,
   active,
@@ -1724,6 +1727,7 @@ function StageTabButton({
   current,
   onSelect,
 }: {
+  episodeId: string;
   phase: (typeof PHASES)[number];
   index: number;
   active: boolean;
@@ -1734,9 +1738,10 @@ function StageTabButton({
   const Icon = phase.icon;
 
   return (
-    <button
-      type="button"
+    <Link
+      href={`/episodes/${episodeId}?stage=${phase.key}`}
       onClick={onSelect}
+      aria-current={active ? "page" : undefined}
       className={cn(
         "group flex min-w-[14rem] flex-1 items-center gap-3 rounded-[22px] border px-4 py-3 text-left transition-all",
         active
@@ -1771,13 +1776,18 @@ function StageTabButton({
           {phase.description}
         </p>
       </div>
-    </button>
+    </Link>
   );
 }
 
-export function EpisodeWorkspace({ episode, sources, artifacts }: WorkspaceProps) {
+export function EpisodeWorkspace({
+  episode,
+  sources,
+  artifacts,
+  initialStage = "sources",
+}: WorkspaceProps) {
   const router = useRouter();
-  const [activeStage, setActiveStage] = useState<PhaseKey>("sources");
+  const [activeStage, setActiveStage] = useState<PhaseKey>(initialStage);
   const [activeSourceId, setActiveSourceId] = useState<string>(sources[0]?.id ?? "");
   const [message, setMessage] = useState<ActionFeedback | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
@@ -1785,6 +1795,10 @@ export function EpisodeWorkspace({ episode, sources, artifacts }: WorkspaceProps
   const [compareArtifactIds, setCompareArtifactIds] = useState<Record<string, string>>({});
   const [artifactViewModes, setArtifactViewModes] = useState<Record<string, ArtifactViewMode>>({});
   const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    setActiveStage(initialStage);
+  }, [initialStage]);
 
   const versionState: ArtifactVersionState = {
     selectedArtifactIds,
@@ -2253,6 +2267,7 @@ export function EpisodeWorkspace({ episode, sources, artifacts }: WorkspaceProps
             {phaseStates.map(({ phase, current, approved }, index) => (
               <StageTabButton
                 key={phase.key}
+                episodeId={episode.id}
                 phase={phase}
                 index={index}
                 active={activeStage === phase.key}

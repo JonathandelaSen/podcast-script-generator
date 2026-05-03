@@ -307,3 +307,5 @@
 [ 7384355ms] [LOG] [Fast Refresh] done in 87ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
 [ 7567218ms] [LOG] [Fast Refresh] rebuilding @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
 [ 7567233ms] [LOG] [Fast Refresh] done in 70ms @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[ 8203251ms] [LOG] [HMR] connected @ http://localhost:3001/_next/static/chunks/09q._next_dist_0hjurs0._.js:2431
+[82959881ms] [ERROR] WebSocket connection to 'ws://localhost:3001/_next/webpack-hmr?id=TCaQCO5TjvQloOq7zIZtg' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:3001/_next/static/chunks/09q._next_dist_client_0slhn09._.js:13299
